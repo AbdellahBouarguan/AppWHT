@@ -17,6 +17,10 @@ public class StreamReceiver {
     }
 
     public void startListening(Consumer<byte[]> dataConsumer) {
+        if (socket == null) {
+            System.err.println("Cannot listen: Socket binding failed (port already in use?)");
+            return;
+        }
         isListening = true;
         new Thread(() -> {
             try {

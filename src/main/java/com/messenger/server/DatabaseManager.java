@@ -6,7 +6,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 public class DatabaseManager {
-    private static final String URL = "jdbc:sqlite:messenger.db";
+    private static final String URL = "jdbc:postgresql://localhost:5432/messenger?user=postgres&password=postgres";
 
     public static Connection getConnection() throws SQLException {
         return DriverManager.getConnection(URL);
@@ -14,13 +14,29 @@ public class DatabaseManager {
 
     public static void initializeDatabase() {
         try (Connection conn = getConnection(); Statement stmt = conn.createStatement()) {
+            // Re-create or Update Users table
             stmt.execute(
-                    "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, role TEXT, isOnline BOOLEAN)");
+                    "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, phone_number TEXT UNIQUE)");
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN phone_number TEXT");
+            } catch (SQLException e) {
+                /* ignore if column exists */ }
+
+            // Re-create or Update Contacts table
             stmt.execute(
-                    "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_id TEXT, receiver_id TEXT, content TEXT, timestamp TEXT)");
-            // Create a default admin user if not exists
+                    "CREATE TABLE IF NOT EXISTS contacts (user_id TEXT, contact_id TEXT, PRIMARY KEY(user_id, contact_id))");
+
+            // Re-create or Update Messages table
             stmt.execute(
-                    "INSERT OR IGNORE INTO users (id, username, password_hash, role, isOnline) VALUES ('admin_id', 'admin', 'admin', 'ADMIN', 0)");
+                    "CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, sender_id TEXT, receiver_id TEXT, content TEXT, timestamp TEXT, is_delivered INT DEFAULT 0)");
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN is_delivered INT DEFAULT 0");
+            } catch (SQLException e) {
+                /* ignore if column exists */ }
+
+            // For testing setup
+            stmt.execute(
+                    "INSERT INTO users (id, username, password_hash, phone_number) VALUES ('admin_id', 'admin', 'admin', '0000') ON CONFLICT DO NOTHING");
         } catch (SQLException e) {
             e.printStackTrace();
         }

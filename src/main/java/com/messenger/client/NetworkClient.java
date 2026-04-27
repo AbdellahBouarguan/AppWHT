@@ -39,7 +39,20 @@ public class NetworkClient {
     }
 
     public void login(String username, String password) {
-        sendData(new NetworkPayload(NetworkPayload.PayloadType.AUTH_REQUEST, new String[] { username, password }));
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.LOGIN_REQUEST, new String[] { username, password }));
+    }
+
+    public void register(String username, String password, String phoneNumber) {
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.REGISTER_REQUEST,
+                new String[] { username, password, phoneNumber }));
+    }
+
+    public void fetchContacts() {
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.FETCH_CONTACTS_REQUEST, null));
+    }
+
+    public void addContact(String contactId) {
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.ADD_CONTACT_REQUEST, contactId));
     }
 
     public void sendData(NetworkPayload payload) {

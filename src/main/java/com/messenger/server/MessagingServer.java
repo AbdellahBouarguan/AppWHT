@@ -9,13 +9,13 @@ import java.util.List;
 
 public class MessagingServer {
     private int port;
-    private List<ClientHandler> activeClients;
+    private java.util.Map<String, ClientHandler> activeClients;
     private boolean isRunning;
     private ServerSocket serverSocket;
 
     public MessagingServer(int port) {
         this.port = port;
-        this.activeClients = Collections.synchronizedList(new ArrayList<>());
+        this.activeClients = new java.util.concurrent.ConcurrentHashMap<>();
     }
 
     public void start() {
@@ -29,7 +29,6 @@ public class MessagingServer {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("New client connected: " + clientSocket.getInetAddress());
                 ClientHandler handler = new ClientHandler(clientSocket, this);
-                activeClients.add(handler);
                 handler.start();
             }
         } catch (IOException e) {
@@ -42,7 +41,7 @@ public class MessagingServer {
         try {
             if (serverSocket != null)
                 serverSocket.close();
-            for (ClientHandler handler : activeClients) {
+            for (ClientHandler handler : activeClients.values()) {
                 handler.disconnect();
             }
         } catch (IOException e) {
@@ -50,44 +49,66 @@ public class MessagingServer {
         }
     }
 
-    public void broadcastUserList() {
-        UserDAO dao = new UserDAO();
-        com.messenger.common.NetworkPayload payload = new com.messenger.common.NetworkPayload(
-                com.messenger.common.NetworkPayload.PayloadType.USERS_LIST_UPDATE,
-                dao.getOnlineUsers());
-        for (ClientHandler handler : activeClients) {
-            if (handler.getAssociatedUser() != null) {
-                handler.sendPayload(payload);
-            }
+    public void registerClient(String userId, ClientHandler handler) {
+        activeClients.put(userId, handler);
+        broadcastStatusUpdate(userId, true);
+
+        // Deliver offline messages
+        MessageDAO mDao = new MessageDAO();
+        java.util.List<com.messenger.common.Message> offlineMsgs = mDao.getUndeliveredMessages(userId);
+        for (com.messenger.common.Message msg : offlineMsgs) {
+            handler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.RECEIVE_MESSAGE, msg));
+        }
+        if (!offlineMsgs.isEmpty()) {
+            mDao.markAllAsDelivered(userId);
         }
     }
 
+    public void broadcastStatusUpdate(String userId, boolean isOnline) {
+        com.messenger.common.User statusUser = new com.messenger.common.User(userId, "");
+        statusUser.setOnline(isOnline);
+
+        com.messenger.common.NetworkPayload payload = new com.messenger.common.NetworkPayload(
+                com.messenger.common.NetworkPayload.PayloadType.STATUS_UPDATE,
+                statusUser);
+
+        for (ClientHandler handler : activeClients.values()) {
+            handler.sendPayload(payload);
+        }
+    }
+
+    public boolean isClientOnline(String userId) {
+        return activeClients.containsKey(userId);
+    }
+
     public void routeMessage(com.messenger.common.Message msg) {
-        new MessageDAO().saveMessage(msg);
-        for (ClientHandler handler : activeClients) {
-            if (handler.getAssociatedUser() != null
-                    && handler.getAssociatedUser().getId().equals(msg.getReceiver().getId())) {
-                handler.sendPayload(new com.messenger.common.NetworkPayload(
-                        com.messenger.common.NetworkPayload.PayloadType.MESSAGE, msg));
-                break;
-            }
+        MessageDAO mDao = new MessageDAO();
+        ClientHandler handler = activeClients.get(msg.getReceiver().getId());
+
+        if (handler != null) {
+            msg.setDelivered(true);
+            mDao.saveMessage(msg); // saves with is_delivered=1
+            handler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.RECEIVE_MESSAGE, msg));
+        } else {
+            msg.setDelivered(false);
+            mDao.saveMessage(msg); // saves with is_delivered=0
         }
     }
 
     public void routeSignalingPayload(com.messenger.common.NetworkPayload payload, String receiverId) {
-        for (ClientHandler handler : activeClients) {
-            if (handler.getAssociatedUser() != null && handler.getAssociatedUser().getId().equals(receiverId)) {
-                handler.sendPayload(payload);
-                break;
-            }
+        ClientHandler handler = activeClients.get(receiverId);
+        if (handler != null) {
+            handler.sendPayload(payload);
         }
     }
 
     public void removeClient(ClientHandler handler) {
-        activeClients.remove(handler);
         if (handler.getAssociatedUser() != null) {
-            new UserDAO().updateOnlineStatus(handler.getAssociatedUser().getId(), false);
-            broadcastUserList();
+            String userId = handler.getAssociatedUser().getId();
+            activeClients.remove(userId);
+            broadcastStatusUpdate(userId, false);
         }
     }
 

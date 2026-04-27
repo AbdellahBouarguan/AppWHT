@@ -10,12 +10,14 @@ public class Message implements Serializable {
     private User sender;
     private User receiver;
     private LocalDateTime timestamp;
+    private boolean isDelivered;
 
     public Message(User sender, User receiver, String content) {
         this.sender = sender;
         this.receiver = receiver;
         this.content = content;
         this.timestamp = LocalDateTime.now();
+        this.isDelivered = false;
     }
 
     public String getContent() {
@@ -48,5 +50,13 @@ public class Message implements Serializable {
 
     public void setTimestamp(LocalDateTime timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public boolean isDelivered() {
+        return isDelivered;
+    }
+
+    public void setDelivered(boolean delivered) {
+        isDelivered = delivered;
     }
 }
