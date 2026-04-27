@@ -1,0 +1,82 @@
+package com.messenger.client;
+
+import com.messenger.common.NetworkPayload;
+
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.net.Socket;
+
+public class NetworkClient {
+    private Socket socket;
+    private ObjectOutputStream out;
+    private ObjectInputStream in;
+    private String serverIp;
+    private int port;
+    private ChatManager chatManager;
+
+    public NetworkClient(String serverIp, int port, ChatManager chatManager) {
+        this.serverIp = serverIp;
+        this.port = port;
+        this.chatManager = chatManager;
+    }
+
+    public boolean connect() {
+        try {
+            socket = new Socket(serverIp, port);
+            out = new ObjectOutputStream(socket.getOutputStream());
+            in = new ObjectInputStream(socket.getInputStream());
+
+            // Start listening thread
+            Thread listenThread = new Thread(this::listen);
+            listenThread.setDaemon(true);
+            listenThread.start();
+            return true;
+        } catch (IOException e) {
+            System.err.println("Failed to connect to server at " + serverIp + ":" + port);
+            return false;
+        }
+    }
+
+    public void login(String username, String password) {
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.AUTH_REQUEST, new String[] { username, password }));
+    }
+
+    public void sendData(NetworkPayload payload) {
+        try {
+            if (out != null) {
+                out.writeObject(payload);
+                out.flush();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void listen() {
+        try {
+            while (true) {
+                Object obj = in.readObject();
+                if (obj instanceof NetworkPayload) {
+                    NetworkPayload payload = (NetworkPayload) obj;
+                    chatManager.handlePayload(payload);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Disconnected from server.");
+        }
+    }
+
+    public void disconnect() {
+        try {
+            if (socket != null)
+                socket.close();
+            if (in != null)
+                in.close();
+            if (out != null)
+                out.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
