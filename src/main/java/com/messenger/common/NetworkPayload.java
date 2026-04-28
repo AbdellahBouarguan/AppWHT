@@ -9,31 +9,34 @@ public class NetworkPayload implements Serializable {
     private static final long serialVersionUID = 1L;
 
     public enum PayloadType {
-        AUTH_REQUEST,
-        AUTH_RESPONSE,
-        LOGOUT_REQUEST,
-        
-        MESSAGE,
-        MESSAGE_ACK,
-        
+        REGISTER_REQUEST,
+        REGISTER_SUCCESS,
+        LOGIN_REQUEST,
+        LOGIN_SUCCESS,
+        ADD_CONTACT_REQUEST,
+        FETCH_CONTACTS_REQUEST,
+        CONTACT_LIST_RESPONSE,
+        FETCH_CHAT_HISTORY_REQUEST,
+        FETCH_CHAT_HISTORY_RESPONSE,
+        SEND_MESSAGE,
+        RECEIVE_MESSAGE,
         CALL_REQUEST,
-        CALL_RESPONSE,
-        
-        ADMIN_KICK,
-        ADMIN_BROADCAST,
-        
-        USERS_LIST_UPDATE
+        CALL_ACCEPT,
+        CALL_REJECT,
+        END_CALL,
+        STATUS_UPDATE,
+        LOGOUT_REQUEST
     }
 
     private PayloadType type;
     private Object data;
     private String status; // e.g., "OK", "ERROR", "ACCEPTED", "REJECTED"
-    
+
     public NetworkPayload(PayloadType type, Object data) {
         this.type = type;
         this.data = data;
     }
-    
+
     public NetworkPayload(PayloadType type, Object data, String status) {
         this.type = type;
         this.data = data;

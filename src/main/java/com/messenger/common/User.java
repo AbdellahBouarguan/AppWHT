@@ -7,11 +7,20 @@ public class User implements Serializable {
 
     private String id;
     private String username;
+    private String phoneNumber;
     private boolean isOnline;
 
     public User(String id, String username) {
         this.id = id;
         this.username = username;
+        this.phoneNumber = "";
+        this.isOnline = false;
+    }
+
+    public User(String id, String username, String phoneNumber) {
+        this.id = id;
+        this.username = username;
+        this.phoneNumber = phoneNumber;
         this.isOnline = false;
     }
 
@@ -31,6 +40,14 @@ public class User implements Serializable {
         this.username = username;
     }
 
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
     public boolean isOnline() {
         return isOnline;
     }
@@ -38,9 +55,10 @@ public class User implements Serializable {
     public void setOnline(boolean online) {
         isOnline = online;
     }
-    
+
     @Override
     public String toString() {
-        return username + (isOnline ? " (Online)" : " (Offline)");
+        return username + (phoneNumber != null && !phoneNumber.isEmpty() ? " (" + phoneNumber + ")" : "")
+                + (isOnline ? " (Online)" : " (Offline)");
     }
 }

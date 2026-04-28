@@ -17,6 +17,14 @@ public class StreamReceiver {
     }
 
     public void startListening(Consumer<byte[]> dataConsumer) {
+        startListening(dataConsumer, null);
+    }
+
+    public void startListening(Consumer<byte[]> dataConsumer, Consumer<Double> amplitudeConsumer) {
+        if (socket == null) {
+            System.err.println("Cannot listen: Socket binding failed (port already in use?)");
+            return;
+        }
         isListening = true;
         new Thread(() -> {
             try {
@@ -25,9 +33,13 @@ public class StreamReceiver {
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                     socket.receive(packet);
 
-                    // Copy exact data received
                     byte[] data = new byte[packet.getLength()];
                     System.arraycopy(packet.getData(), 0, data, 0, packet.getLength());
+
+                    if (amplitudeConsumer != null) {
+                        double amplitude = calculateAmplitude(data);
+                        amplitudeConsumer.accept(amplitude);
+                    }
 
                     if (dataConsumer != null) {
                         dataConsumer.accept(data);
@@ -38,6 +50,19 @@ public class StreamReceiver {
                     e.printStackTrace();
             }
         }).start();
+    }
+
+    private double calculateAmplitude(byte[] data) {
+        long sum = 0;
+        int count = data.length / 2;
+        if (count == 0)
+            return 0;
+        for (int i = 0; i < data.length - 1; i += 2) {
+            short sample = (short) ((data[i] & 0xFF) | (data[i + 1] << 8));
+            sum += (long) sample * sample;
+        }
+        double rms = Math.sqrt((double) sum / count);
+        return Math.min(1.0, rms / 32768.0); // Normalize to 0.0 - 1.0 (16-bit max is 32768)
     }
 
     public void stop() {

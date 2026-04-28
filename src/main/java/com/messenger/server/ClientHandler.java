@@ -17,10 +17,12 @@ public class ClientHandler extends Thread {
     private ObjectOutputStream out;
     private ObjectInputStream in;
     private User associatedUser;
+    private String clientIp;
 
     public ClientHandler(Socket socket, MessagingServer server) {
         this.clientSocket = socket;
         this.server = server;
+        this.clientIp = socket.getInetAddress().getHostAddress();
     }
 
     @Override
@@ -46,30 +48,66 @@ public class ClientHandler extends Thread {
     }
 
     private void handlePayload(NetworkPayload payload) {
+        UserDAO dao = new UserDAO();
         switch (payload.getType()) {
-            case AUTH_REQUEST:
-                String[] creds = (String[]) payload.getData();
-                UserDAO dao = new UserDAO();
-                User user = dao.authenticate(creds[0], creds[1]);
-                if (user == null) {
-                    // For demo purposes, auto-register if doesn't exist
-                    user = dao.register(creds[0], creds[1]);
-                }
-
-                if (user != null) {
-                    associatedUser = user;
-                    dao.updateOnlineStatus(user.getId(), true);
-                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.AUTH_RESPONSE, user, "OK"));
-                    server.broadcastUserList(); // notify all
+            case REGISTER_REQUEST:
+                String[] regCreds = (String[]) payload.getData();
+                User newUser = dao.register(regCreds[0], regCreds[1], regCreds[2]);
+                if (newUser != null) {
+                    associatedUser = newUser;
+                    server.registerClient(newUser.getId(), this);
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.REGISTER_SUCCESS, newUser, "OK"));
                 } else {
-                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.AUTH_RESPONSE, null, "ERROR"));
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.REGISTER_SUCCESS, null, "ERROR"));
                 }
                 break;
 
-            case MESSAGE:
+            case LOGIN_REQUEST:
+                String[] loginCreds = (String[]) payload.getData();
+                User user = dao.authenticate(loginCreds[0], loginCreds[1]);
+                if (user != null) {
+                    associatedUser = user;
+                    server.registerClient(user.getId(), this);
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.LOGIN_SUCCESS, user, "OK"));
+                } else {
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.LOGIN_SUCCESS, null, "ERROR"));
+                }
+                break;
+
+            case FETCH_CONTACTS_REQUEST:
+                if (associatedUser != null) {
+                    java.util.List<User> contacts = dao.getContactsForUser(associatedUser.getId());
+                    for (User c : contacts) {
+                        c.setOnline(server.isClientOnline(c.getId()));
+                    }
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.CONTACT_LIST_RESPONSE, contacts));
+                }
+                break;
+
+            case FETCH_CHAT_HISTORY_REQUEST:
+                if (associatedUser != null) {
+                    String contactId = (String) payload.getData();
+                    MessageDAO msgDao = new MessageDAO();
+                    java.util.List<Message> history = msgDao.getChatHistory(associatedUser.getId(), contactId);
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.FETCH_CHAT_HISTORY_RESPONSE, history));
+                }
+                break;
+
+            case ADD_CONTACT_REQUEST:
+                if (associatedUser != null) {
+                    String contactPhoneNumber = (String) payload.getData();
+                    dao.addContactByPhone(associatedUser.getId(), contactPhoneNumber);
+                    java.util.List<User> newContacts = dao.getContactsForUser(associatedUser.getId());
+                    for (User c : newContacts) {
+                        c.setOnline(server.isClientOnline(c.getId()));
+                    }
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.CONTACT_LIST_RESPONSE, newContacts));
+                }
+                break;
+
+            case SEND_MESSAGE:
                 Message msg = (Message) payload.getData();
                 server.routeMessage(msg);
-                sendPayload(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_ACK, "SENT"));
                 break;
 
             case LOGOUT_REQUEST:
@@ -77,11 +115,29 @@ public class ClientHandler extends Thread {
                 break;
 
             case CALL_REQUEST:
-            case CALL_RESPONSE:
-                // The data payload here can be an Object array: [receiverId,
-                // signallingData/Port]
+            case CALL_ACCEPT:
+            case CALL_REJECT:
+            case END_CALL:
                 Object[] callData = (Object[]) payload.getData();
                 String receiverId = (String) callData[0];
+
+                // Inject our own IP address so the other peer knows where to stream
+                if (payload.getType() == NetworkPayload.PayloadType.CALL_REQUEST ||
+                        payload.getType() == NetworkPayload.PayloadType.CALL_ACCEPT) {
+
+                    Object[] newData = new Object[callData.length + 1];
+                    System.arraycopy(callData, 0, newData, 0, callData.length);
+                    newData[0] = associatedUser.getId(); // Replace destination with SENDER so receiver knows who called
+                    newData[callData.length] = this.clientIp;
+                    payload = new NetworkPayload(payload.getType(), newData);
+                } else {
+                    // For REJECT and END_CALL, inject sender ID too
+                    Object[] newData = new Object[callData.length];
+                    System.arraycopy(callData, 0, newData, 0, callData.length);
+                    newData[0] = associatedUser.getId();
+                    payload = new NetworkPayload(payload.getType(), newData);
+                }
+
                 server.routeSignalingPayload(payload, receiverId);
                 break;
 
