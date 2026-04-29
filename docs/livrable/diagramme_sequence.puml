@@ -1,0 +1,43 @@
+@startuml
+autonumber
+skinparam maxMessageSize 150
+
+actor "Utilisateur A (Appelant)" as Caller
+participant "Interface Client A" as UI_A
+participant "Logique Client A\n(ChatManager/NetworkClient)" as Logic_A
+participant "Serveur Central\n(ClientHandler)" as Server
+participant "Logique Client B\n(ChatManager/NetworkClient)" as Logic_B
+participant "Interface Client B" as UI_B
+actor "Utilisateur B (Appelé)" as Callee
+
+Caller -> UI_A : Clique sur "Appel Vidéo"
+UI_A -> Logic_A : requestCall(userB, VIDEO)
+Logic_A -> Server : [TCP] CALL_REQUEST (id=B)
+Server -> Server : Injecte IP de A\nrouteSignalingPayload()
+Server -> Logic_B : [TCP] CALL_REQUEST (avec IP de A)
+Logic_B -> UI_B : onIncomingCall()
+UI_B -> Callee : Affiche "Appel entrant..."
+
+Callee -> UI_B : Clique sur "Accepter"
+UI_B -> Logic_B : acceptCall()
+Logic_B -> Server : [TCP] CALL_ACCEPT (id=A)
+Server -> Server : Injecte IP de B\nrouteSignalingPayload()
+Server -> Logic_A : [TCP] CALL_ACCEPT (avec IP de B)
+Logic_A -> UI_A : onCallAccepted()
+
+UI_A -> UI_A : Instancie StreamSender/StreamReceiver
+UI_B -> UI_B : Instancie StreamSender/StreamReceiver
+
+note over UI_A, UI_B : Démarrage du flux multimédia direct (P2P)
+loop Flux Continu
+    UI_A -[#blue]> UI_B : [UDP] Paquets Vidéo/Audio
+    UI_B -[#blue]> UI_A : [UDP] Paquets Vidéo/Audio
+end
+
+Caller -> UI_A : Clique sur "Raccrocher"
+UI_A -> Logic_A : endCall()
+Logic_A -> Server : [TCP] END_CALL
+Server -> Logic_B : [TCP] END_CALL
+Logic_B -> UI_B : onCallEnded()
+UI_B -> Callee : Ferme la fenêtre d'appel
+@enduml

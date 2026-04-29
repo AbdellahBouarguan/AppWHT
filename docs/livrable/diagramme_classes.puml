@@ -1,0 +1,105 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+package "Client" {
+  class ClientMain {
+    + start(Stage)
+    + navigateToChat()
+  }
+
+  class ChatManager {
+    - currentUser: User
+    + connectAndAuth()
+    + sendMessage()
+    + requestCall()
+    + handlePayload(NetworkPayload)
+  }
+
+  class NetworkClient {
+    - socket: Socket
+    + connect()
+    + sendData(NetworkPayload)
+    - listen()
+  }
+
+  package "UI" {
+    class ChatView {
+      + getView()
+      - startMediaPresentation()
+    }
+  }
+
+  package "Media" {
+    class MediaCapture {
+      - isCapturing: boolean
+      + startCapture()
+      + stopCapture()
+    }
+
+    class StreamSender {
+      - socket: DatagramSocket
+      + sendData(byte[])
+      + stop()
+    }
+
+    class StreamReceiver {
+      - socket: DatagramSocket
+      + startListening()
+      + stop()
+    }
+  }
+}
+
+package "Commun" {
+  class NetworkPayload {
+    - type: PayloadType
+    - data: Object
+    - status: String
+  }
+}
+
+package "Serveur" {
+  class MessagingServer {
+    - activeClients: Map
+    + start()
+    + routeMessage()
+    + routeSignalingPayload()
+  }
+
+  class ClientHandler {
+    - clientSocket: Socket
+    + run()
+    - handlePayload()
+  }
+
+  class UserDAO {
+    + authenticate()
+    + register()
+    + addContactByPhone()
+  }
+
+  class MessageDAO {
+    + saveMessage()
+    + getUndeliveredMessages()
+    + getChatHistory()
+  }
+}
+
+ClientMain "1" *-- "1" ChatManager
+ChatView "1" o-- "1" ChatManager
+ChatManager "1" *-- "1" NetworkClient
+
+ChatView "1" *-- "1" MediaCapture
+ChatView "1" *-- "1..*" StreamSender
+ChatView "1" *-- "1..*" StreamReceiver
+
+MediaCapture "1" *-- "1..*" StreamSender : utilise >
+
+NetworkClient ..> NetworkPayload : envoie/reçoit
+
+MessagingServer "1" *-- "*" ClientHandler
+ClientHandler ..> NetworkPayload : traite
+ClientHandler ..> UserDAO : utilise
+ClientHandler ..> MessageDAO : utilise
+
+@enduml

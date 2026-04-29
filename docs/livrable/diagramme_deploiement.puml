@@ -1,0 +1,41 @@
+@startuml
+skinparam node {
+  BackgroundColor White
+}
+
+node "Appareil Client 1" <<Device>> {
+  node "Environnement d'Exécution Java (JRE)" <<Execution Environment>> {
+    artifact "Client.jar" {
+      component "Interface et Logique\nClient Messagerie" as ClientComp1
+    }
+  }
+}
+
+node "Appareil Client 2" <<Device>> {
+  node "Environnement d'Exécution Java (JRE) " <<Execution Environment>> {
+    artifact "Client2.jar" {
+      component "Interface et Logique\nClient Messagerie" as ClientComp2
+    }
+  }
+}
+
+node "Serveur Central" <<Device>> {
+  node "Environnement d'Exécution Java (JRE)  " <<Execution Environment>> {
+    artifact "Server.jar" {
+      component "Service de Messagerie\n(Messaging Server)" as ServerComp
+    }
+  }
+}
+
+database "Serveur de Base de Données" <<Device>> {
+  component "Base de Données PostgreSQL" as DBComp
+}
+
+ClientComp1 ..> ServerComp : TCP/IP (Port 1234)\n[Signalisation & Texte]
+ClientComp2 ..> ServerComp : TCP/IP (Port 1234)\n[Signalisation & Texte]
+
+ServerComp ..> DBComp : JDBC/TCP (Port 5432)\n[Persistance]
+
+ClientComp1 <..> ClientComp2 : UDP/IP (Ports 5001, 5002)\n[Flux Média P2P]
+
+@enduml
