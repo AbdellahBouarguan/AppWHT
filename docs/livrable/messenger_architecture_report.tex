@@ -1,0 +1,126 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\title{Comprehensive Architectural Analysis \\ of a Client-Server Messenger Application}
+\author{System Architect}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Introduction}
+The Messenger Application is a robust, multi-threaded, client-server system developed in Java. It provides real-time text messaging, presence tracking, and peer-to-peer multimedia communication, including both audio and video calling functionalities. The architecture is distinctly separated into client and server components. The client side utilizes JavaFX for a responsive graphical user interface and leverages UDP alongside specialized libraries (JavaCV for video, JavaSound for audio) to facilitate low-latency media streaming. The server acts as a centralized routing hub utilizing standard Java Sockets (TCP) to manage client connections, state, and message delivery, persistently storing application data within a PostgreSQL database via JDBC.
+
+\section{Module Analysis}
+
+\subsection{Common Module (\texttt{com.messenger.common})}
+The \texttt{common} package acts as the foundational data layer shared between the client and server.
+\begin{itemize}
+    \item \texttt{User.java} \& \texttt{Message.java}: These are standard POJOs implementing \texttt{Serializable}. They represent the core entities of the domain model. The \texttt{Message} class includes an \texttt{isDelivered} boolean flag, crucial for managing offline message queues.
+    \item \texttt{CallType.java}: An enumeration defining \texttt{AUDIO} and \texttt{VIDEO} call types.
+    \item \texttt{NetworkPayload.java}: This class implements the Wrapper Pattern. Every piece of data sent over the TCP network is encapsulated within a \texttt{NetworkPayload} object. It contains a \texttt{PayloadType} enum (e.g., \texttt{LOGIN\_REQUEST}, \texttt{SEND\_MESSAGE}, \texttt{CALL\_REQUEST}), an \texttt{Object} payload for data, and a \texttt{status} string. This standardization greatly simplifies the parsing logic on both ends of the socket.
+\end{itemize}
+
+\subsection{Client Module (\texttt{com.messenger.client})}
+This module forms the backbone of the client application logic, effectively decoupling the network operations from the UI.
+\begin{itemize}
+    \item \texttt{ClientLauncher.java} \& \texttt{ClientMain.java}: Entry points for the JavaFX application. They manage the primary stage and navigation between the login and chat views.
+    \item \texttt{NetworkClient.java}: Manages the TCP socket connection to the server. It utilizes \texttt{ObjectOutputStream} and \texttt{ObjectInputStream} to transmit \texttt{NetworkPayload} instances. It spawns a dedicated daemon thread that continuously listens for incoming payloads.
+    \item \texttt{ChatManager.java}: The core orchestrator on the client side. It abstracts network operations for the UI. It heavily utilizes callback interfaces (\texttt{MessageListener}, \texttt{CallListener}, etc.) to propagate events back to the UI. It uses \texttt{Platform.runLater()} to ensure all UI updates triggered by network events are safely executed on the JavaFX Application Thread.
+\end{itemize}
+
+\subsection{Client UI Module (\texttt{com.messenger.client.ui})}
+Handles all graphical interactions using JavaFX.
+\begin{itemize}
+    \item \texttt{LoginView.java}: Provides a modern interface for user authentication and registration.
+    \item \texttt{ChatView.java}: The main messaging interface. It maintains the user list, chat history, and media call controls. When a media call is initiated or received, this class dynamically provisions PiP (Picture-in-Picture) video layouts and visual audio equalizers, tying UI elements directly to the underlying media stream handlers.
+\end{itemize}
+
+\subsection{Client Media Module (\texttt{com.messenger.client.media})}
+Responsible for real-time peer-to-peer data transmission using UDP to minimize latency.
+\begin{itemize}
+    \item \texttt{StreamSender.java} \& \texttt{StreamReceiver.java}: Wrappers around \texttt{DatagramSocket}. They handle the transmission and reception of byte arrays to and from specific IP addresses and ports. The receiver calculates audio amplitude for UI visualization using root-mean-square (RMS) computations on the raw byte stream.
+    \item \texttt{MediaCapture.java}: Orchestrates hardware capture. It uses JavaSound (\texttt{TargetDataLine}) to capture microphone input and JavaCV (\texttt{OpenCVFrameGrabber}) to capture webcam frames. Video frames are converted to JPEGs and compressed before transmission. Multi-threading is heavily used to separate audio and video capture loops.
+\end{itemize}
+
+\subsection{Server Module (\texttt{com.messenger.server})}
+The centralized routing and state management component.
+\begin{itemize}
+    \item \texttt{MessagingServer.java}: The main server daemon. It listens on a specific port (1234) and spawns a new \texttt{ClientHandler} thread for every incoming socket connection. It maintains a \texttt{ConcurrentHashMap} of active clients for O(1) routing lookups.
+    \item \texttt{ClientHandler.java}: Represents an active connection. It continuously reads \texttt{NetworkPayload} objects from the stream and routes them. It handles crucial signaling logic: when a \texttt{CALL\_REQUEST} is processed, it dynamically injects the caller's IP address into the payload before routing it to the callee, enabling the subsequent UDP peer-to-peer connection.
+    \item \texttt{DatabaseManager.java}: Manages JDBC connections to PostgreSQL.
+    \item \texttt{UserDAO.java} \& \texttt{MessageDAO.java}: Implement the Data Access Object pattern. They encapsulate all SQL queries. \texttt{MessageDAO} specifically handles the \texttt{is\_delivered} logic; if a message is sent to an offline user, it is stored with \texttt{is\_delivered = 0}. When the user logs in, the \texttt{MessagingServer} fetches these offline messages, delivers them, and subsequently marks them as delivered.
+\end{itemize}
+
+\section{System Workflows}
+
+\subsection{Authentication \& Registration Flow}
+\begin{enumerate}
+    \item The user inputs credentials into the \texttt{LoginView}.
+    \item \texttt{ChatManager} instructs \texttt{NetworkClient} to send a \texttt{LOGIN\_REQUEST} payload.
+    \item \texttt{MessagingServer} receives the request via the \texttt{ClientHandler}.
+    \item \texttt{ClientHandler} delegates to \texttt{UserDAO}, which queries the PostgreSQL database.
+    \item Upon success, \texttt{ClientHandler} registers the client in the \texttt{activeClients} map, broadcasts a \texttt{STATUS\_UPDATE} to notify contacts that the user is online, and flushes any pending offline messages.
+    \item A \texttt{LOGIN\_SUCCESS} payload is returned to the client, triggering UI navigation via \texttt{Platform.runLater}.
+\end{enumerate}
+
+\subsection{Messaging Flow}
+\begin{enumerate}
+    \item The sender types a message in \texttt{ChatView} and clicks send.
+    \item \texttt{ChatManager} creates a \texttt{Message} object and wraps it in a \texttt{SEND\_MESSAGE} payload.
+    \item \texttt{ClientHandler} receives the payload and passes it to \texttt{MessagingServer.routeMessage()}.
+    \item The server checks the \texttt{activeClients} map. If the receiver is online, the message is sent through the receiver's socket, and stored in the database with \texttt{is\_delivered=1}.
+    \item If the receiver is offline, the server skips socket transmission and directly stores the message via \texttt{MessageDAO} with \texttt{is\_delivered=0}.
+\end{enumerate}
+
+\subsection{Peer-to-Peer Media Signaling \& Streaming Flow}
+\begin{enumerate}
+    \item \textbf{Signaling (TCP):} The caller clicks the video call button. A \texttt{CALL\_REQUEST} payload is sent to the server.
+    \item The server's \texttt{ClientHandler} intercepts the request, appends the caller's public/network IP address to the payload, and routes it to the callee.
+    \item The callee receives the request, prompts the user, and sends a \texttt{CALL\_ACCEPT} payload back to the server.
+    \item The server appends the callee's IP address and routes the acceptance back to the caller. Both parties now possess each other's IP addresses.
+    \item \textbf{Streaming (UDP):} Both clients locally instantiate \texttt{StreamSender} and \texttt{StreamReceiver} instances bound to predetermined ports (e.g., 5001 for audio, 5003 for video).
+    \item \texttt{MediaCapture} begins pulling frames from the webcam and audio from the microphone, transmitting raw UDP packets directly between the two client IPs, completely bypassing the central server to ensure minimal latency.
+\end{enumerate}
+
+\section{Conclusion}
+The Messenger Application demonstrates a highly effective hybrid architecture. By utilizing TCP for reliable signaling, state management, and text messaging, while offloading high-bandwidth, latency-sensitive media transmission to P2P UDP streams, the system achieves both reliability and performance. The strict separation of concerns, evidenced by the distinct UI, Network, and Media packages, alongside the robust DAO layer for PostgreSQL integration, results in a highly maintainable and scalable codebase.
+
+\end{document}

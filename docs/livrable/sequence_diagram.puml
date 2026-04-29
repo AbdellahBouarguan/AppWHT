@@ -1,0 +1,37 @@
+@startuml
+actor CallerUI
+participant "Caller ChatManager" as CallerCM
+participant "Caller NetworkClient" as CallerNC
+participant "Server (ClientHandler)" as Server
+participant "Callee NetworkClient" as CalleeNC
+participant "Callee ChatManager" as CalleeCM
+actor CalleeUI
+
+CallerUI -> CallerCM : requestCall(user, VIDEO)
+CallerCM -> CallerNC : sendData(CALL_REQUEST)
+CallerNC -> Server : TCP: CALL_REQUEST
+Server -> Server : routeSignalingPayload()
+Server -> CalleeNC : TCP: CALL_REQUEST (with Caller IP)
+CalleeNC -> CalleeCM : handlePayload(CALL_REQUEST)
+CalleeCM -> CalleeUI : onIncomingCall()
+
+CalleeUI -> CalleeCM : acceptCall()
+CalleeCM -> CalleeNC : sendData(CALL_ACCEPT)
+CalleeNC -> Server : TCP: CALL_ACCEPT
+Server -> Server : routeSignalingPayload()
+Server -> CallerNC : TCP: CALL_ACCEPT (with Callee IP)
+CallerNC -> CallerCM : handlePayload()
+CallerCM -> CallerUI : onCallAccepted()
+
+CallerUI -> CallerUI : startMediaPresentation()
+CallerUI -> CallerUI : new StreamSender/Receiver
+
+CalleeUI -> CalleeUI : startMediaPresentation()
+CalleeUI -> CalleeUI : new StreamSender/Receiver
+
+loop Continuous Stream
+    CallerUI -[#blue]-> CalleeUI : UDP: Video/Audio Packets
+    CalleeUI -[#blue]-> CallerUI : UDP: Video/Audio Packets
+end
+
+@enduml

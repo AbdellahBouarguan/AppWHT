@@ -1,0 +1,38 @@
+@startuml
+
+node "Client Device 1" <<Device>> {
+  node "Java Runtime Environment" <<Execution Environment>> {
+    artifact "Client.jar" {
+      component "Messenger Client UI & Logic"
+    }
+  }
+}
+
+node "Client Device 2" <<Device>> {
+  node "Java Runtime Environment 2" <<Execution Environment>> {
+    artifact "Client2.jar" {
+      component "Messenger Client UI & Logic "
+    }
+  }
+}
+
+node "Server Machine" <<Device>> {
+  node "Java Runtime Environment 3" <<Execution Environment>> {
+    artifact "Server.jar" {
+      component "Messaging Server"
+    }
+  }
+}
+
+database "Database Server" <<Device>> {
+  component "PostgreSQL Database"
+}
+
+"Client Device 1" ..> "Server Machine" : TCP/IP (Port 1234)
+"Client Device 2" ..> "Server Machine" : TCP/IP (Port 1234)
+
+"Server Machine" ..> "Database Server" : JDBC/TCP (Port 5432)
+
+"Client Device 1" <..> "Client Device 2" : UDP/IP (Ports 5001, 5002) : P2P Media
+
+@enduml
