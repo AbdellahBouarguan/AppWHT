@@ -3,13 +3,11 @@ left to right direction
 skinparam packageStyle rectangle
 
 actor "Utilisateur" as user
-actor "Base de données" as db <<System Actor>>
 
 package "Application de Messagerie (Type WhatsApp)" {
   usecase "S'inscrire / Se connecter" as UC1
   usecase "Afficher les utilisateurs connectés" as UC2
   usecase "Envoyer/Recevoir des messages texte" as UC3
-  usecase "Partager des fichiers/photos (V2)" as UC4
   usecase "Démarrer un appel Audio/Vidéo" as UC5
   usecase "Accepter/Refuser un appel" as UC6
 }
@@ -17,11 +15,7 @@ package "Application de Messagerie (Type WhatsApp)" {
 user -- UC1
 user -- UC2
 user -- UC3
-user -- UC4
 user -- UC5
 user -- UC6
 
-UC1 -- db
-UC2 -- db
-UC3 -- db
 @enduml

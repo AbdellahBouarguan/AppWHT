@@ -1,43 +1,92 @@
 @startuml
 autonumber
-skinparam maxMessageSize 150
+skinparam maxMessageSize 200
 
-actor "Utilisateur A (Appelant)" as Caller
-participant "Interface Client A" as UI_A
-participant "Logique Client A\n(ChatManager/NetworkClient)" as Logic_A
-participant "Serveur Central\n(ClientHandler)" as Server
-participant "Logique Client B\n(ChatManager/NetworkClient)" as Logic_B
-participant "Interface Client B" as UI_B
-actor "Utilisateur B (Appelé)" as Callee
+actor "Utilisateur" as User
+participant "Client\n(UI & Logique)" as Client
+participant "Serveur Central\n(MessagingServer & ClientHandler)" as Serveur
+database "Base de Données\n(UserDAO & MessageDAO)" as DB
 
-Caller -> UI_A : Clique sur "Appel Vidéo"
-UI_A -> Logic_A : requestCall(userB, VIDEO)
-Logic_A -> Server : [TCP] CALL_REQUEST (id=B)
-Server -> Server : Injecte IP de A\nrouteSignalingPayload()
-Server -> Logic_B : [TCP] CALL_REQUEST (avec IP de A)
-Logic_B -> UI_B : onIncomingCall()
-UI_B -> Callee : Affiche "Appel entrant..."
-
-Callee -> UI_B : Clique sur "Accepter"
-UI_B -> Logic_B : acceptCall()
-Logic_B -> Server : [TCP] CALL_ACCEPT (id=A)
-Server -> Server : Injecte IP de B\nrouteSignalingPayload()
-Server -> Logic_A : [TCP] CALL_ACCEPT (avec IP de B)
-Logic_A -> UI_A : onCallAccepted()
-
-UI_A -> UI_A : Instancie StreamSender/StreamReceiver
-UI_B -> UI_B : Instancie StreamSender/StreamReceiver
-
-note over UI_A, UI_B : Démarrage du flux multimédia direct (P2P)
-loop Flux Continu
-    UI_A -[#blue]> UI_B : [UDP] Paquets Vidéo/Audio
-    UI_B -[#blue]> UI_A : [UDP] Paquets Vidéo/Audio
+== 1. Authentification et Connexion ==
+User -> Client : Saisit identifiants (Login/Register)
+Client -> Serveur : [TCP] LOGIN_REQUEST / REGISTER_REQUEST
+Serveur -> DB : Vérifie / Enregistre l'utilisateur
+alt Identifiants Invalides ou Erreur
+    DB --> Serveur : Échec (Null)
+    Serveur -> Client : [TCP] LOGIN_SUCCESS / REGISTER_SUCCESS (status="ERROR")
+    Client -> User : Affiche un message d'erreur
+else Authentification Réussie
+    DB --> Serveur : Utilisateur (Succès)
+    Serveur -> Serveur : registerClient() (Ajout à activeClients)
+    Serveur -> DB : Récupère les messages hors-ligne
+    DB --> Serveur : Liste de messages
+    Serveur -> Client : [TCP] LOGIN_SUCCESS (status="OK")
+    
+    opt Si messages hors-ligne existants
+        Serveur -> Client : [TCP] RECEIVE_MESSAGE (Messages en attente)
+        Serveur -> DB : markAllAsDelivered()
+    end
+    Serveur -> User : [TCP] STATUS_UPDATE (En ligne) vers tous les contacts
+    Client -> User : Affiche l'écran principal (ChatView)
 end
 
-Caller -> UI_A : Clique sur "Raccrocher"
-UI_A -> Logic_A : endCall()
-Logic_A -> Server : [TCP] END_CALL
-Server -> Logic_B : [TCP] END_CALL
-Logic_B -> UI_B : onCallEnded()
-UI_B -> Callee : Ferme la fenêtre d'appel
+== 2. Récupération des Données ==
+Client -> Serveur : [TCP] FETCH_CONTACTS_REQUEST
+Serveur -> DB : getContactsForUser()
+DB --> Serveur : Liste des contacts
+Serveur -> Client : [TCP] CONTACT_LIST_RESPONSE (avec statut en ligne)
+
+Client -> Serveur : [TCP] FETCH_CHAT_HISTORY_REQUEST (idContact)
+Serveur -> DB : getChatHistory()
+DB --> Serveur : Historique des messages
+Serveur -> Client : [TCP] FETCH_CHAT_HISTORY_RESPONSE
+
+== 3. Messagerie Textuelle ==
+User -> Client : Envoie un message texte
+Client -> Serveur : [TCP] SEND_MESSAGE
+Serveur -> Serveur : Vérifie activeClients (isClientOnline)
+alt Contact En Ligne
+    Serveur -> DB : saveMessage() (is_delivered=1)
+    Serveur -> User : [TCP] RECEIVE_MESSAGE (Vers le socket du destinataire)
+else Contact Hors Ligne
+    Serveur -> DB : saveMessage() (is_delivered=0)
+    note right of Serveur : Message stocké pour livraison future
+end
+
+== 4. Appel Multimédia (Signalisation et P2P) ==
+User -> Client : Clique sur "Appeler" (Audio/Vidéo)
+Client -> Serveur : [TCP] CALL_REQUEST (idDestinataire)
+Serveur -> Serveur : Intercepte et injecte l'IP appelant dans le payload
+Serveur -> User : [TCP] CALL_REQUEST (Achemine vers le destinataire)
+
+alt L'appelé refuse ou ignore
+    <- Serveur : [TCP] CALL_REJECT (Depuis l'appelé)
+    Serveur -> Serveur : Achemine la réponse
+    Serveur -> Client : [TCP] CALL_REJECT
+    Client -> User : Affiche "Appel refusé"
+else L'appelé accepte
+    <- Serveur : [TCP] CALL_ACCEPT (Depuis l'appelé, avec IP de l'appelé)
+    Serveur -> Serveur : Achemine la réponse
+    Serveur -> Client : [TCP] CALL_ACCEPT (avec IP distante)
+    
+    Client -> Client : startMediaPresentation()\n(Instanciation MediaCapture, StreamSender, StreamReceiver)
+    
+    note over Client : Démarrage du flux multimédia direct (P2P UDP)
+    loop Flux Continu
+        <[#blue]- Client : [UDP] Paquets Vidéo/Audio (vers IP distante)
+        <[#blue]- Client : [UDP] Paquets Vidéo/Audio (depuis IP distante)
+    end
+    
+    User -> Client : Raccroche
+    Client -> Serveur : [TCP] END_CALL
+    Serveur -> User : [TCP] Achemine la fin d'appel
+    Client -> Client : stopMedia() et nettoie les ressources UDP
+end
+
+== 5. Déconnexion ==
+User -> Client : Se déconnecte ou ferme l'app
+Client -> Serveur : [TCP] LOGOUT_REQUEST (ou socket fermé)
+Serveur -> Serveur : removeClient()
+Serveur -> User : [TCP] STATUS_UPDATE (Hors ligne) vers les contacts
+Serveur -> Client : Fermeture de la connexion
 @enduml

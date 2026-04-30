@@ -1,105 +1,216 @@
 @startuml
 skinparam classAttributeIconSize 0
+skinparam monochrome true
 
-package "Client" {
-  class ClientMain {
-    + start(Stage)
-    + navigateToChat()
+package "com.messenger.common" {
+  enum CallType {
+    AUDIO
+    VIDEO
   }
 
-  class ChatManager {
-    - currentUser: User
-    + connectAndAuth()
-    + sendMessage()
-    + requestCall()
-    + handlePayload(NetworkPayload)
+  class User {
+    - id: String
+    - username: String
+    - phoneNumber: String
+    - isOnline: boolean
+    + getId()
+    + getUsername()
+    + setOnline()
   }
 
-  class NetworkClient {
-    - socket: Socket
-    + connect()
-    + sendData(NetworkPayload)
-    - listen()
+  class Message {
+    - id: int
+    - sender: User
+    - receiver: User
+    - content: String
+    - timestamp: Date
+    - isDelivered: boolean
+    + getSender()
+    + getReceiver()
+    + setDelivered()
   }
 
-  package "UI" {
-    class ChatView {
-      + getView()
-      - startMediaPresentation()
-    }
-  }
-
-  package "Media" {
-    class MediaCapture {
-      - isCapturing: boolean
-      + startCapture()
-      + stopCapture()
-    }
-
-    class StreamSender {
-      - socket: DatagramSocket
-      + sendData(byte[])
-      + stop()
-    }
-
-    class StreamReceiver {
-      - socket: DatagramSocket
-      + startListening()
-      + stop()
-    }
-  }
-}
-
-package "Commun" {
   class NetworkPayload {
     - type: PayloadType
     - data: Object
     - status: String
+    + getType()
+    + getData()
+    + getStatus()
   }
 }
 
-package "Serveur" {
+package "com.messenger.client" {
+  class ClientLauncher {
+    + main(String[])
+  }
+
+  class ClientMain {
+    - primaryStage: Stage
+    - chatManager: ChatManager
+    + start(Stage)
+    + navigateToLogin()
+    + navigateToChat()
+  }
+
+  class NetworkClient {
+    - socket: Socket
+    - in: ObjectInputStream
+    - out: ObjectOutputStream
+    - manager: ChatManager
+    + connect(host, port)
+    + sendData(NetworkPayload)
+    + disconnect()
+    - listen()
+  }
+
+  class ChatManager {
+    - currentUser: User
+    - networkClient: NetworkClient
+    - loginListener: LoginListener
+    - messageListener: MessageListener
+    - callListener: CallListener
+    + connectAndAuth(username, pass)
+    + sendMessage(user, content)
+    + requestCall(user, type)
+    + acceptCall(user, type)
+    + handlePayload(NetworkPayload)
+  }
+}
+
+package "com.messenger.client.ui" {
+  class LoginView {
+    - manager: ChatManager
+    - parent: ClientMain
+    + getView()
+    - handleLogin()
+    - handleRegister()
+  }
+
+  class ChatView {
+    - manager: ChatManager
+    - parent: ClientMain
+    - mediaCapture: MediaCapture
+    - audioSender: StreamSender
+    - videoSender: StreamSender
+    - audioReceiver: StreamReceiver
+    - videoReceiver: StreamReceiver
+    + getView()
+    + onMessageReceived()
+    + startMediaPresentation()
+    + stopMediaPresentation()
+  }
+}
+
+package "com.messenger.client.media" {
+  class MediaCapture {
+    - grabber: OpenCVFrameGrabber
+    - audioLine: TargetDataLine
+    - isCapturing: boolean
+    - audioSender: StreamSender
+    - videoSender: StreamSender
+    + startCapture()
+    + stopCapture()
+    - captureVideo()
+    - captureAudio()
+  }
+
+  class StreamSender {
+    - socket: DatagramSocket
+    - address: InetAddress
+    - port: int
+    + sendData(byte[])
+    + stop()
+  }
+
+  class StreamReceiver {
+    - socket: DatagramSocket
+    - port: int
+    - isRunning: boolean
+    + startListening(Consumer<byte[]>)
+    + stop()
+  }
+}
+
+package "com.messenger.server" {
   class MessagingServer {
-    - activeClients: Map
+    - port: int
+    - activeClients: Map<String, ClientHandler>
+    - serverSocket: ServerSocket
     + start()
-    + routeMessage()
-    + routeSignalingPayload()
+    + registerClient(userId, ClientHandler)
+    + routeMessage(Message)
+    + routeSignalingPayload(NetworkPayload, receiverId)
+    + broadcastStatusUpdate()
+    + removeClient()
   }
 
   class ClientHandler {
     - clientSocket: Socket
+    - server: MessagingServer
+    - associatedUser: User
+    - clientIp: String
     + run()
-    - handlePayload()
+    - handlePayload(NetworkPayload)
+    + sendPayload(NetworkPayload)
+    + disconnect()
+  }
+
+  class DatabaseManager {
+    - URL: String
+    - USER: String
+    - PASS: String
+    + getConnection(): Connection
+    + initializeDatabase()
   }
 
   class UserDAO {
-    + authenticate()
-    + register()
-    + addContactByPhone()
+    + authenticate(username, password): User
+    + register(username, pass, phone): User
+    + addContactByPhone(userId, phone)
+    + getContactsForUser(userId): List<User>
   }
 
   class MessageDAO {
-    + saveMessage()
-    + getUndeliveredMessages()
-    + getChatHistory()
+    + saveMessage(Message)
+    + getChatHistory(user1, user2): List<Message>
+    + getUndeliveredMessages(userId): List<Message>
+    + markAllAsDelivered(userId)
   }
 }
 
-ClientMain "1" *-- "1" ChatManager
-ChatView "1" o-- "1" ChatManager
-ChatManager "1" *-- "1" NetworkClient
-
-ChatView "1" *-- "1" MediaCapture
-ChatView "1" *-- "1..*" StreamSender
-ChatView "1" *-- "1..*" StreamReceiver
-
-MediaCapture "1" *-- "1..*" StreamSender : utilise >
-
-NetworkClient ..> NetworkPayload : envoie/reçoit
-
+' Relations Serveur
 MessagingServer "1" *-- "*" ClientHandler
-ClientHandler ..> NetworkPayload : traite
+ClientHandler ..> DatabaseManager : getConnection
 ClientHandler ..> UserDAO : utilise
 ClientHandler ..> MessageDAO : utilise
+UserDAO ..> DatabaseManager
+MessageDAO ..> DatabaseManager
+
+' Relations Client
+ClientLauncher ..> ClientMain : lance
+ClientMain "1" *-- "1" ChatManager
+ClientMain *-- LoginView
+ClientMain *-- ChatView
+LoginView "1" o-- "1" ChatManager
+ChatView "1" o-- "1" ChatManager
+ChatManager "1" *-- "1" NetworkClient
+NetworkClient "1" o-- "1" ChatManager : appelle >
+
+' Relations Media Client
+ChatView "1" *-- "1" MediaCapture
+ChatView "1" *-- "2" StreamSender : possède >
+ChatView "1" *-- "2" StreamReceiver : possède >
+MediaCapture o-- StreamSender : utilise >
+
+' Relations Common
+ChatManager ..> NetworkPayload
+NetworkClient ..> NetworkPayload
+ClientHandler ..> NetworkPayload
+MessagingServer ..> NetworkPayload
+ChatManager "1" o-- "1" User : currentUser
+ClientHandler "1" o-- "1" User : associatedUser
+NetworkPayload o-- CallType
+Message o-- User
 
 @enduml
