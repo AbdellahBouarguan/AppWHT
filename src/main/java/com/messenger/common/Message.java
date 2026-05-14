@@ -2,22 +2,40 @@ package com.messenger.common;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 public class Message implements Serializable {
     private static final long serialVersionUID = 1L;
 
+    public enum MessageStatus {
+        SENDING,
+        SENT_TO_SERVER,
+        DELIVERED_TO_CLIENT,
+        READ
+    }
+
+    private String id;
     private String content;
     private User sender;
     private User receiver;
     private LocalDateTime timestamp;
-    private boolean isDelivered;
+    private MessageStatus status;
 
     public Message(User sender, User receiver, String content) {
+        this.id = UUID.randomUUID().toString();
         this.sender = sender;
         this.receiver = receiver;
         this.content = content;
         this.timestamp = LocalDateTime.now();
-        this.isDelivered = false;
+        this.status = MessageStatus.SENDING;
+    }
+
+    public String getId() {
+        return id;
+    }
+    
+    public void setId(String id) {
+        this.id = id;
     }
 
     public String getContent() {
@@ -52,11 +70,11 @@ public class Message implements Serializable {
         this.timestamp = timestamp;
     }
 
-    public boolean isDelivered() {
-        return isDelivered;
+    public MessageStatus getStatus() {
+        return status;
     }
 
-    public void setDelivered(boolean delivered) {
-        isDelivered = delivered;
+    public void setStatus(MessageStatus status) {
+        this.status = status;
     }
 }

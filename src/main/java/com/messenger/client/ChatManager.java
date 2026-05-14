@@ -62,9 +62,10 @@ public class ChatManager {
         }
     }
 
-    public void sendMessage(User receiver, String text) {
-        Message msg = new Message(currentUser, receiver, text);
+    public com.messenger.common.Message sendMessage(User receiver, String text) {
+        com.messenger.common.Message msg = new com.messenger.common.Message(currentUser, receiver, text);
         networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
+        return msg;
     }
 
     public void requestCall(User receiver, CallType type) {
@@ -107,12 +108,22 @@ public class ChatManager {
         this.statusUpdateListener = statusListener;
     }
 
+    public interface MessageAckListener {
+        void onMessageAck(Message msg);
+    }
+
+    private MessageAckListener messageAckListener;
+
     public void setCallListener(CallListener callListener) {
         this.callListener = callListener;
     }
 
     public void setChatHistoryListener(ChatHistoryListener listener) {
         this.chatHistoryListener = listener;
+    }
+
+    public void setMessageAckListener(MessageAckListener listener) {
+        this.messageAckListener = listener;
     }
 
     public User getCurrentUser() {
@@ -151,8 +162,17 @@ public class ChatManager {
                     }
                     break;
                 case RECEIVE_MESSAGE:
+                    Message recvMsg = (Message) payload.getData();
+                    recvMsg.setStatus(Message.MessageStatus.DELIVERED_TO_CLIENT);
+                    networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_ACK, recvMsg));
+                    
                     if (messageListener != null) {
-                        messageListener.onMessageReceived((Message) payload.getData());
+                        messageListener.onMessageReceived(recvMsg);
+                    }
+                    break;
+                case MESSAGE_ACK:
+                    if (messageAckListener != null) {
+                        messageAckListener.onMessageAck((Message) payload.getData());
                     }
                     break;
                 case CALL_REQUEST:
@@ -162,21 +182,21 @@ public class ChatManager {
                     if (callListener != null) {
                         Object[] callData = (Object[]) payload.getData();
                         this.latestCallData = callData;
-                        String peerId = (String) callData[0];
+                        User peer = (User) callData[0];
                         com.messenger.common.CallType callType = (com.messenger.common.CallType) callData[1];
 
                         switch (payload.getType()) {
                             case CALL_REQUEST:
-                                callListener.onIncomingCall(peerId, callType);
+                                callListener.onIncomingCall(peer, callType);
                                 break;
                             case CALL_ACCEPT:
-                                callListener.onCallAccepted(peerId, callType);
+                                callListener.onCallAccepted(peer, callType);
                                 break;
                             case CALL_REJECT:
-                                callListener.onCallRejected(peerId, callType);
+                                callListener.onCallRejected(peer, callType);
                                 break;
                             case END_CALL:
-                                callListener.onCallEnded(peerId);
+                                callListener.onCallEnded(peer);
                                 break;
                         }
                     }
@@ -200,13 +220,13 @@ public class ChatManager {
     }
 
     public interface CallListener {
-        void onIncomingCall(String callerId, CallType type);
+        void onIncomingCall(User caller, CallType type);
 
-        void onCallAccepted(String calleeId, CallType type);
+        void onCallAccepted(User callee, CallType type);
 
-        void onCallRejected(String calleeId, CallType type);
+        void onCallRejected(User callee, CallType type);
 
-        void onCallEnded(String calleeId);
+        void onCallEnded(User callee);
     }
 
     public Object[] getLatestCallData() {

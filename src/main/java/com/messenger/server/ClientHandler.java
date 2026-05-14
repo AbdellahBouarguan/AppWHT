@@ -110,6 +110,11 @@ public class ClientHandler extends Thread {
                 server.routeMessage(msg);
                 break;
 
+            case MESSAGE_ACK:
+                Message ackMsg = (Message) payload.getData();
+                server.routeAck(ackMsg);
+                break;
+
             case LOGOUT_REQUEST:
                 disconnect();
                 break;
@@ -127,14 +132,14 @@ public class ClientHandler extends Thread {
 
                     Object[] newData = new Object[callData.length + 1];
                     System.arraycopy(callData, 0, newData, 0, callData.length);
-                    newData[0] = associatedUser.getId(); // Replace destination with SENDER so receiver knows who called
+                    newData[0] = associatedUser; // Replace destination with SENDER so receiver knows who called
                     newData[callData.length] = this.clientIp;
                     payload = new NetworkPayload(payload.getType(), newData);
                 } else {
-                    // For REJECT and END_CALL, inject sender ID too
+                    // For REJECT and END_CALL, inject sender User too
                     Object[] newData = new Object[callData.length];
                     System.arraycopy(callData, 0, newData, 0, callData.length);
-                    newData[0] = associatedUser.getId();
+                    newData[0] = associatedUser;
                     payload = new NetworkPayload(payload.getType(), newData);
                 }
 

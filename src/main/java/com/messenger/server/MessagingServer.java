@@ -84,16 +84,32 @@ public class MessagingServer {
 
     public void routeMessage(com.messenger.common.Message msg) {
         MessageDAO mDao = new MessageDAO();
-        ClientHandler handler = activeClients.get(msg.getReceiver().getId());
+        ClientHandler senderHandler = activeClients.get(msg.getSender().getId());
+        ClientHandler receiverHandler = activeClients.get(msg.getReceiver().getId());
 
-        if (handler != null) {
-            msg.setDelivered(true);
-            mDao.saveMessage(msg); // saves with is_delivered=1
-            handler.sendPayload(new com.messenger.common.NetworkPayload(
+        msg.setStatus(com.messenger.common.Message.MessageStatus.SENT_TO_SERVER);
+        mDao.saveMessage(msg); 
+        
+        // Notify sender that server received it
+        if (senderHandler != null) {
+            senderHandler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.MESSAGE_ACK, msg));
+        }
+
+        if (receiverHandler != null) {
+            receiverHandler.sendPayload(new com.messenger.common.NetworkPayload(
                     com.messenger.common.NetworkPayload.PayloadType.RECEIVE_MESSAGE, msg));
-        } else {
-            msg.setDelivered(false);
-            mDao.saveMessage(msg); // saves with is_delivered=0
+        }
+    }
+
+    public void routeAck(com.messenger.common.Message msg) {
+        MessageDAO mDao = new MessageDAO();
+        mDao.updateMessageStatus(msg.getId(), msg.getStatus());
+        
+        ClientHandler senderHandler = activeClients.get(msg.getSender().getId());
+        if (senderHandler != null) {
+            senderHandler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.MESSAGE_ACK, msg));
         }
     }
 

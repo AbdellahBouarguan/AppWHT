@@ -25,7 +25,8 @@ public class NetworkPayload implements Serializable {
         CALL_REJECT,
         END_CALL,
         STATUS_UPDATE,
-        LOGOUT_REQUEST
+        LOGOUT_REQUEST,
+        MESSAGE_ACK
     }
 
     private PayloadType type;

@@ -28,7 +28,15 @@ public class DatabaseManager {
 
             // Re-create or Update Messages table
             stmt.execute(
-                    "CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, sender_id TEXT, receiver_id TEXT, content TEXT, timestamp TEXT, is_delivered INT DEFAULT 0)");
+                    "CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, message_uuid TEXT UNIQUE, sender_id TEXT, receiver_id TEXT, content TEXT, timestamp TEXT, status INT DEFAULT 0)");
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN message_uuid TEXT UNIQUE");
+            } catch (SQLException e) {
+                /* ignore if column exists */ }
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN status INT DEFAULT 0");
+            } catch (SQLException e) {
+                /* ignore if column exists */ }
             try {
                 stmt.execute("ALTER TABLE messages ADD COLUMN is_delivered INT DEFAULT 0");
             } catch (SQLException e) {
