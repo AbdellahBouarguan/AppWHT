@@ -119,6 +119,13 @@ public class ClientHandler extends Thread {
                 disconnect();
                 break;
 
+            case TYPING_UPDATE:
+                Object[] typingData = (Object[]) payload.getData();
+                String targetId = (String) typingData[0];
+                boolean isTyping = (Boolean) typingData[1];
+                server.routeTypingUpdate(associatedUser.getId(), targetId, isTyping);
+                break;
+
             case CALL_REQUEST:
             case CALL_ACCEPT:
             case CALL_REJECT:

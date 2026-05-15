@@ -113,6 +113,15 @@ public class MessagingServer {
         }
     }
 
+    public void routeTypingUpdate(String senderId, String receiverId, boolean isTyping) {
+        ClientHandler receiverHandler = activeClients.get(receiverId);
+        if (receiverHandler != null) {
+            Object[] data = {senderId, isTyping};
+            receiverHandler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.TYPING_UPDATE, data));
+        }
+    }
+
     public void routeSignalingPayload(com.messenger.common.NetworkPayload payload, String receiverId) {
         ClientHandler handler = activeClients.get(receiverId);
         if (handler != null) {

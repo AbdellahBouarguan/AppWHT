@@ -15,6 +15,7 @@ public class ChatManager {
     private MessageListener messageListener;
     private UserListListener userListListener;
     private CallListener callListener;
+    private TypingListener typingListener;
     private StatusUpdateListener statusUpdateListener;
     private ChatHistoryListener chatHistoryListener;
     private Object[] latestCallData;
@@ -68,6 +69,19 @@ public class ChatManager {
         return msg;
     }
 
+    public com.messenger.common.Message sendFileMessage(User receiver, String text, java.io.File file) {
+        com.messenger.common.Message msg = new com.messenger.common.Message(currentUser, receiver, text);
+        try {
+            byte[] fileData = java.nio.file.Files.readAllBytes(file.toPath());
+            msg.setFileData(fileData);
+            msg.setFileName(file.getName());
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
+        networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
+        return msg;
+    }
+
     public void requestCall(User receiver, CallType type) {
         Object[] callData = new Object[] { receiver.getId(), type };
         networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.CALL_REQUEST, callData));
@@ -116,6 +130,10 @@ public class ChatManager {
 
     public void setCallListener(CallListener callListener) {
         this.callListener = callListener;
+    }
+
+    public void setTypingListener(TypingListener typingListener) {
+        this.typingListener = typingListener;
     }
 
     public void setChatHistoryListener(ChatHistoryListener listener) {
@@ -201,6 +219,14 @@ public class ChatManager {
                         }
                     }
                     break;
+                case TYPING_UPDATE:
+                    if (typingListener != null) {
+                        Object[] typingData = (Object[]) payload.getData();
+                        String senderId = (String) typingData[0];
+                        boolean isTyping = (Boolean) typingData[1];
+                        typingListener.onTypingUpdate(senderId, isTyping);
+                    }
+                    break;
                 default:
                     break;
             }
@@ -227,6 +253,17 @@ public class ChatManager {
         void onCallRejected(User callee, CallType type);
 
         void onCallEnded(User callee);
+    }
+
+    public interface TypingListener {
+        void onTypingUpdate(String senderId, boolean isTyping);
+    }
+
+    public void sendTypingUpdate(String receiverId, boolean isTyping) {
+        if (networkClient != null) {
+            Object[] data = {receiverId, isTyping};
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.TYPING_UPDATE, data));
+        }
     }
 
     public Object[] getLatestCallData() {

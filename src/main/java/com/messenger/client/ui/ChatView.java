@@ -29,6 +29,7 @@ public class ChatView {
     private javafx.stage.Stage mediaStage;
 
     private javafx.scene.layout.StackPane rootPane;
+    private HBox typingIndicatorBubble;
 
     public ChatView(ClientMain mainApp, ChatManager chatManager) {
         this.chatManager = chatManager;
@@ -109,6 +110,13 @@ public class ChatView {
         Label contactName = new Label("Select a contact");
         contactName.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
         contactName.setFont(javafx.scene.text.Font.font("System", javafx.scene.text.FontWeight.BOLD, 16));
+
+        Label contactStatus = new Label("");
+        contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+        contactStatus.setFont(javafx.scene.text.Font.font("System", 13));
+
+        VBox nameBox = new VBox(2, contactName, contactStatus);
+        nameBox.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
@@ -135,7 +143,7 @@ public class ChatView {
         Button endCallBtn = new Button("", endCallIcon);
         endCallBtn.setStyle("-fx-background-color: transparent; -fx-cursor: hand;");
 
-        chatHeader.getChildren().addAll(contactAvatar, contactName, headerSpacer, audioCallBtn, videoCallBtn, endCallBtn);
+        chatHeader.getChildren().addAll(contactAvatar, nameBox, headerSpacer, audioCallBtn, videoCallBtn, endCallBtn);
 
         // Messages Area (Using VBox and ScrollPane for bubbles)
         chatArea = new VBox(8);
@@ -157,6 +165,12 @@ public class ChatView {
         inputBox.setPadding(new javafx.geometry.Insets(10, 16, 10, 16));
         inputBox.setStyle("-fx-background-color: #202c33;");
 
+        javafx.scene.shape.SVGPath attachIcon = new javafx.scene.shape.SVGPath();
+        attachIcon.setContent("M16.5,6v11.5c0,2.21-1.79,4-4,4s-4-1.79-4-4V5c0-1.38,1.12-2.5,2.5-2.5s2.5,1.12,2.5,2.5v10.5c0,0.55-0.45,1-1,1s-1-0.45-1-1V6H10v9.5c0,1.38,1.12,2.5,2.5,2.5s2.5-1.12,2.5-2.5V5c0-2.21-1.79-4-4-4S7,2.79,7,5v12.5c0,3.04,2.46,5.5,5.5,5.5s5.5-2.46,5.5-5.5V6H16.5z");
+        attachIcon.setFill(javafx.scene.paint.Color.web("#8696a0"));
+        Button attachBtn = new Button("", attachIcon);
+        attachBtn.setStyle("-fx-background-color: transparent; -fx-cursor: hand;");
+
         TextField inputField = new TextField();
         inputField.setPromptText("Type a message");
         inputField.setStyle("-fx-background-color: #2a3942; -fx-text-fill: #e9edef; -fx-prompt-text-fill: #8696a0; -fx-background-radius: 8; -fx-padding: 10 15; -fx-font-size: 15;");
@@ -165,7 +179,7 @@ public class ChatView {
         Button sendBtn = new Button("➤");
         sendBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #8696a0; -fx-font-size: 20; -fx-cursor: hand;");
 
-        inputBox.getChildren().addAll(inputField, sendBtn);
+        inputBox.getChildren().addAll(attachBtn, inputField, sendBtn);
 
         centerPane.getChildren().addAll(chatHeader, chatScroll, inputBox);
         view.setCenter(centerPane);
@@ -174,6 +188,9 @@ public class ChatView {
         usersList.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
             if (newV != null) {
                 contactName.setText(newV.getUsername());
+                contactStatus.setText(newV.isOnline() ? "online" : "offline");
+                contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+                showTypingIndicator(false); // Clear typing indicator for previous user
             }
         });
 
@@ -186,6 +203,54 @@ public class ChatView {
             }
         });
         inputField.setOnAction(e -> sendBtn.fire());
+        
+        attachBtn.setOnAction(e -> {
+            if (selectedUser == null) return;
+            javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
+            fileChooser.setTitle("Select File to Send");
+            java.io.File file = fileChooser.showOpenDialog(view.getScene().getWindow());
+            if (file != null) {
+                if (file.length() > 5 * 1024 * 1024) {
+                    addSystemMessage("File too large. Limit is 5MB.");
+                    return;
+                }
+                com.messenger.common.Message msg = chatManager.sendFileMessage(selectedUser, inputField.getText(), file);
+                addMessageBubble(msg, true);
+                inputField.clear();
+            }
+        });
+
+        java.util.Timer[] typingTimer = new java.util.Timer[1];
+        boolean[] isTypingSent = new boolean[]{false};
+
+        inputField.textProperty().addListener((obs, oldText, newText) -> {
+            if (selectedUser == null) return;
+            
+            if (!newText.isEmpty()) {
+                if (!isTypingSent[0]) {
+                    chatManager.sendTypingUpdate(selectedUser.getId(), true);
+                    isTypingSent[0] = true;
+                }
+                
+                if (typingTimer[0] != null) {
+                    typingTimer[0].cancel();
+                }
+                typingTimer[0] = new java.util.Timer();
+                typingTimer[0].schedule(new java.util.TimerTask() {
+                    @Override
+                    public void run() {
+                        chatManager.sendTypingUpdate(selectedUser.getId(), false);
+                        isTypingSent[0] = false;
+                    }
+                }, 1500); // Stop typing after 1.5s
+            } else {
+                if (isTypingSent[0]) {
+                    chatManager.sendTypingUpdate(selectedUser.getId(), false);
+                    isTypingSent[0] = false;
+                    if (typingTimer[0] != null) typingTimer[0].cancel();
+                }
+            }
+        });
 
         audioCallBtn.setOnAction(e -> {
             if (selectedUser != null) {
@@ -235,6 +300,30 @@ public class ChatView {
                 }
                 usersList.setItems(FXCollections.observableArrayList(items));
                 usersList.refresh();
+                
+                if (selectedUser != null && selectedUser.getId().equals(updatedUser.getId())) {
+                    selectedUser.setOnline(updatedUser.isOnline());
+                    if (!contactStatus.getText().equals("typing...")) {
+                        contactStatus.setText(updatedUser.isOnline() ? "online" : "offline");
+                        contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+                    }
+                }
+            });
+        });
+
+        chatManager.setTypingListener((senderId, isTyping) -> {
+            Platform.runLater(() -> {
+                if (selectedUser != null && selectedUser.getId().equals(senderId)) {
+                    if (isTyping) {
+                        contactStatus.setText("typing...");
+                        contactStatus.setTextFill(javafx.scene.paint.Color.web("#00a884")); // WhatsApp green
+                        showTypingIndicator(true);
+                    } else {
+                        contactStatus.setText(selectedUser.isOnline() ? "online" : "offline");
+                        contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+                        showTypingIndicator(false);
+                    }
+                }
             });
         });
 
@@ -533,7 +622,69 @@ public class ChatView {
                                   ? javafx.scene.paint.Color.web("#53bdeb") 
                                   : javafx.scene.paint.Color.web("#8696a0"));
             
-            VBox bubbleContent = new VBox(2, msgLabel, timeLabel);
+            VBox mainContent = new VBox(5);
+            
+            if (msg.getFileData() != null) {
+                String fname = msg.getFileName().toLowerCase();
+                if (fname.endsWith(".png") || fname.endsWith(".jpg") || fname.endsWith(".jpeg") || fname.endsWith(".gif") || fname.endsWith(".webp")) {
+                    javafx.scene.image.Image img = new javafx.scene.image.Image(new java.io.ByteArrayInputStream(msg.getFileData()));
+                    javafx.scene.image.ImageView imgView = new javafx.scene.image.ImageView(img);
+                    imgView.setFitWidth(250);
+                    imgView.setPreserveRatio(true);
+                    
+                    Button imgDlBtn = new Button("⬇ Download Image");
+                    imgDlBtn.setStyle("-fx-background-color: rgba(0,0,0,0.3); -fx-text-fill: white; -fx-font-size: 10; -fx-cursor: hand; -fx-background-radius: 5; -fx-padding: 2 5 2 5;");
+                    imgDlBtn.setOnAction(e -> {
+                        javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+                        fc.setInitialFileName(msg.getFileName());
+                        java.io.File dest = fc.showSaveDialog(view.getScene().getWindow());
+                        if (dest != null) {
+                            try {
+                                java.nio.file.Files.write(dest.toPath(), msg.getFileData());
+                                addSystemMessage("Saved " + msg.getFileName());
+                            } catch (Exception ex) { ex.printStackTrace(); }
+                        }
+                    });
+
+                    mainContent.getChildren().addAll(imgView, imgDlBtn);
+                } else {
+                    HBox fileBox = new HBox(10);
+                    fileBox.setStyle("-fx-background-color: rgba(255,255,255,0.05); -fx-padding: 10; -fx-background-radius: 5;");
+                    fileBox.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+                    
+                    javafx.scene.shape.SVGPath fileIcon = new javafx.scene.shape.SVGPath();
+                    fileIcon.setContent("M6,2C4.89,2,4.01,2.89,4.01,4L4,20c0,1.1,0.89,2,1.99,2H18c1.1,0,2-0.9,2-2V8l-6-6H6z M13,9V3.5L18.5,9H13z");
+                    fileIcon.setFill(javafx.scene.paint.Color.web("#e9edef"));
+                    
+                    Label fNameLabel = new Label(msg.getFileName());
+                    fNameLabel.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
+                    fNameLabel.setWrapText(true);
+                    fNameLabel.setMaxWidth(150);
+                    
+                    Button dlBtn = new Button("⬇");
+                    dlBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #00a884; -fx-cursor: hand;");
+                    dlBtn.setOnAction(e -> {
+                        javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+                        fc.setInitialFileName(msg.getFileName());
+                        java.io.File dest = fc.showSaveDialog(view.getScene().getWindow());
+                        if (dest != null) {
+                            try {
+                                java.nio.file.Files.write(dest.toPath(), msg.getFileData());
+                                addSystemMessage("Saved " + msg.getFileName());
+                            } catch (Exception ex) { ex.printStackTrace(); }
+                        }
+                    });
+                    
+                    fileBox.getChildren().addAll(fileIcon, fNameLabel, dlBtn);
+                    mainContent.getChildren().add(fileBox);
+                }
+            }
+            
+            if (msg.getContent() != null && !msg.getContent().isEmpty()) {
+                mainContent.getChildren().add(msgLabel);
+            }
+            
+            VBox bubbleContent = new VBox(2, mainContent, timeLabel);
             bubbleContent.setAlignment(isMe ? javafx.geometry.Pos.CENTER_RIGHT : javafx.geometry.Pos.BOTTOM_RIGHT);
             bubbleContent.setPadding(new javafx.geometry.Insets(6, 10, 6, 10));
             bubbleContent.setMaxWidth(400); // Max bubble width
@@ -590,5 +741,29 @@ public class ChatView {
             hbox.setPadding(new javafx.geometry.Insets(5, 0, 5, 0));
             chatArea.getChildren().add(hbox);
         });
+    }
+
+    private void showTypingIndicator(boolean show) {
+        if (show) {
+            if (typingIndicatorBubble == null) {
+                Label dots = new Label("...");
+                dots.setStyle("-fx-text-fill: #e9edef; -fx-font-size: 24; -fx-font-weight: bold;");
+                
+                HBox bubble = new HBox(dots);
+                bubble.setStyle("-fx-background-color: #202c33; -fx-background-radius: 0 15 15 15; -fx-padding: 0 15 5 15;");
+                bubble.setAlignment(javafx.geometry.Pos.CENTER);
+                
+                typingIndicatorBubble = new HBox(bubble);
+                typingIndicatorBubble.setPadding(new javafx.geometry.Insets(5, 20, 5, 20));
+                typingIndicatorBubble.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+            }
+            if (!chatArea.getChildren().contains(typingIndicatorBubble)) {
+                chatArea.getChildren().add(typingIndicatorBubble);
+            }
+        } else {
+            if (typingIndicatorBubble != null) {
+                chatArea.getChildren().remove(typingIndicatorBubble);
+            }
+        }
     }
 }

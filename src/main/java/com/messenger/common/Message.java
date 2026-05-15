@@ -20,6 +20,8 @@ public class Message implements Serializable {
     private User receiver;
     private LocalDateTime timestamp;
     private MessageStatus status;
+    private byte[] fileData;
+    private String fileName;
 
     public Message(User sender, User receiver, String content) {
         this.id = UUID.randomUUID().toString();
@@ -76,5 +78,21 @@ public class Message implements Serializable {
 
     public void setStatus(MessageStatus status) {
         this.status = status;
+    }
+
+    public byte[] getFileData() {
+        return fileData;
+    }
+
+    public void setFileData(byte[] fileData) {
+        this.fileData = fileData;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
     }
 }
