@@ -51,7 +51,10 @@ public class MessagingServer {
 
     public void registerClient(String userId, ClientHandler handler) {
         activeClients.put(userId, handler);
-        broadcastStatusUpdate(userId, true);
+        if (handler.getAssociatedUser() != null) {
+            handler.getAssociatedUser().setOnline(true);
+            broadcastStatusUpdate(handler.getAssociatedUser());
+        }
 
         // Deliver offline messages
         MessageDAO mDao = new MessageDAO();
@@ -65,15 +68,14 @@ public class MessagingServer {
         }
     }
 
-    public void broadcastStatusUpdate(String userId, boolean isOnline) {
-        com.messenger.common.User statusUser = new com.messenger.common.User(userId, "");
-        statusUser.setOnline(isOnline);
-
+    public void broadcastStatusUpdate(com.messenger.common.User statusUser) {
         com.messenger.common.NetworkPayload payload = new com.messenger.common.NetworkPayload(
                 com.messenger.common.NetworkPayload.PayloadType.STATUS_UPDATE,
                 statusUser);
 
-        for (ClientHandler handler : activeClients.values()) {
+        // Copy to avoid ConcurrentModificationException
+        java.util.List<ClientHandler> handlers = new java.util.ArrayList<>(activeClients.values());
+        for (ClientHandler handler : handlers) {
             handler.sendPayload(payload);
         }
     }
@@ -113,6 +115,22 @@ public class MessagingServer {
         }
     }
 
+    public void broadcastMessagesRead(String originalSenderId, String readerId) {
+        ClientHandler senderHandler = activeClients.get(originalSenderId);
+        if (senderHandler != null) {
+            senderHandler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.MESSAGE_READ, readerId));
+        }
+    }
+
+    public void routeDeleteMessage(String messageUuid, String recipientId) {
+        ClientHandler handler = activeClients.get(recipientId);
+        if (handler != null) {
+            handler.sendPayload(new com.messenger.common.NetworkPayload(
+                    com.messenger.common.NetworkPayload.PayloadType.DELETE_MESSAGE, messageUuid));
+        }
+    }
+
     public void routeTypingUpdate(String senderId, String receiverId, boolean isTyping) {
         ClientHandler receiverHandler = activeClients.get(receiverId);
         if (receiverHandler != null) {
@@ -133,7 +151,7 @@ public class MessagingServer {
         if (handler.getAssociatedUser() != null) {
             String userId = handler.getAssociatedUser().getId();
             activeClients.remove(userId);
-            broadcastStatusUpdate(userId, false);
+            // broadcastStatusUpdate is already called in ClientHandler.disconnect()
         }
     }
 

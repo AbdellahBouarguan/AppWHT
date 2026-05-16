@@ -115,8 +115,48 @@ public class ClientHandler extends Thread {
                 server.routeAck(ackMsg);
                 break;
 
+            case MESSAGE_READ:
+                if (associatedUser != null) {
+                    String contactId = (String) payload.getData();
+                    new MessageDAO().markAllAsRead(contactId, associatedUser.getId());
+                    server.broadcastMessagesRead(contactId, associatedUser.getId());
+                }
+                break;
+
+            case DELETE_MESSAGE:
+                if (associatedUser != null) {
+                    Object[] deleteData = (Object[]) payload.getData();
+                    String msgUuid = (String) deleteData[0];
+                    String recipientId = (String) deleteData[1];
+                    new MessageDAO().deleteMessage(msgUuid);
+                    server.routeDeleteMessage(msgUuid, recipientId);
+                }
+                break;
+
+            case MESSAGE_REACTION:
+                if (associatedUser != null) {
+                    Object[] reactionData = (Object[]) payload.getData();
+                    String msgUuid = (String) reactionData[0];
+                    String emoji = (String) reactionData[1];
+                    String recipientId = (String) reactionData[2];
+                    
+                    new MessageDAO().addReaction(msgUuid, associatedUser.getId(), emoji);
+                    Object[] routedData = new Object[] { msgUuid, associatedUser.getId(), emoji };
+                    server.routeSignalingPayload(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_REACTION, routedData), recipientId);
+                }
+                break;
+
             case LOGOUT_REQUEST:
                 disconnect();
+                break;
+
+            case UPDATE_PROFILE:
+                if (associatedUser != null) {
+                    byte[] avatarBytes = (byte[]) payload.getData();
+                    associatedUser.setAvatarData(avatarBytes);
+                    dao.updateUserAvatar(associatedUser.getId(), avatarBytes);
+                    server.broadcastStatusUpdate(associatedUser);
+                }
                 break;
 
             case TYPING_UPDATE:
@@ -170,6 +210,22 @@ public class ClientHandler extends Thread {
     }
 
     public void disconnect() {
+        if (associatedUser != null) {
+            java.time.LocalDateTime now = java.time.LocalDateTime.now();
+            associatedUser.setLastSeen(now);
+            new UserDAO().updateUserLastSeen(associatedUser.getId(), now);
+            associatedUser.setOnline(false);
+            
+            // 1. Remove from active clients map first so broadcast doesn't include this user
+            server.removeClient(this);
+            
+            // 2. Now broadcast to others
+            server.broadcastStatusUpdate(associatedUser);
+        } else {
+            server.removeClient(this);
+        }
+
+        // 3. Finally close resources
         try {
             if (in != null)
                 in.close();
@@ -180,7 +236,6 @@ public class ClientHandler extends Thread {
         } catch (IOException e) {
             // Ignore
         }
-        server.removeClient(this);
     }
 
     public User getAssociatedUser() {

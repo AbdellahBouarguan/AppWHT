@@ -63,21 +63,43 @@ public class ChatManager {
         }
     }
 
-    public com.messenger.common.Message sendMessage(User receiver, String text) {
+    public void sendDirectMessage(com.messenger.common.Message msg) {
+        if (networkClient != null) {
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
+        }
+    }
+
+    public com.messenger.common.Message sendMessage(User receiver, String text, com.messenger.common.Message parentMsg) {
         com.messenger.common.Message msg = new com.messenger.common.Message(currentUser, receiver, text);
+        if (parentMsg != null) {
+            msg.setParentMessageId(parentMsg.getId());
+            msg.setParentMessageContent(parentMsg.getContent());
+        }
+
         networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
         return msg;
     }
 
-    public com.messenger.common.Message sendFileMessage(User receiver, String text, java.io.File file) {
-        com.messenger.common.Message msg = new com.messenger.common.Message(currentUser, receiver, text);
+    public com.messenger.common.Message sendFileMessage(User receiver, String text, java.io.File file, com.messenger.common.Message parentMsg) {
         try {
             byte[] fileData = java.nio.file.Files.readAllBytes(file.toPath());
-            msg.setFileData(fileData);
-            msg.setFileName(file.getName());
+            return sendMessage(receiver.getId(), text, file.getName(), fileData, parentMsg);
         } catch (java.io.IOException e) {
             e.printStackTrace();
+            return null;
         }
+    }
+
+    public com.messenger.common.Message sendMessage(String receiverId, String text, String fileName, byte[] fileData, com.messenger.common.Message parentMsg) {
+        User receiver = new User(receiverId, "");
+        com.messenger.common.Message msg = new com.messenger.common.Message(currentUser, receiver, text);
+        if (parentMsg != null) {
+            msg.setParentMessageId(parentMsg.getId());
+            msg.setParentMessageContent(parentMsg.getContent());
+        }
+        if (fileName != null) msg.setFileName(fileName);
+        if (fileData != null) msg.setFileData(fileData);
+        
         networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
         return msg;
     }
@@ -110,6 +132,18 @@ public class ChatManager {
         this.onLoginFailed = onLoginFailed;
     }
 
+    public void updateProfilePicture(java.io.File file) {
+        try {
+            byte[] avatarData = java.nio.file.Files.readAllBytes(file.toPath());
+            if (currentUser != null) {
+                currentUser.setAvatarData(avatarData);
+                networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.UPDATE_PROFILE, avatarData));
+            }
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     public void setMessageListener(MessageListener messageListener) {
         this.messageListener = messageListener;
     }
@@ -126,7 +160,22 @@ public class ChatManager {
         void onMessageAck(Message msg);
     }
 
+    public interface MessagesReadListener {
+        void onMessagesRead(String readerId);
+    }
+
+    public interface MessageDeletedListener {
+        void onMessageDeleted(String messageUuid);
+    }
+
+    public interface MessageReactionListener {
+        void onMessageReaction(String messageUuid, String userId, String emoji);
+    }
+
     private MessageAckListener messageAckListener;
+    private MessagesReadListener messagesReadListener;
+    private MessageDeletedListener messageDeletedListener;
+    private MessageReactionListener messageReactionListener;
 
     public void setCallListener(CallListener callListener) {
         this.callListener = callListener;
@@ -142,6 +191,38 @@ public class ChatManager {
 
     public void setMessageAckListener(MessageAckListener listener) {
         this.messageAckListener = listener;
+    }
+
+    public void setMessagesReadListener(MessagesReadListener listener) {
+        this.messagesReadListener = listener;
+    }
+
+    public void setMessageDeletedListener(MessageDeletedListener listener) {
+        this.messageDeletedListener = listener;
+    }
+
+    public void setMessageReactionListener(MessageReactionListener listener) {
+        this.messageReactionListener = listener;
+    }
+
+    public void addReaction(String uuid, String emoji, String recipientId) {
+        if (networkClient != null) {
+            Object[] reactionData = new Object[] { uuid, emoji, recipientId };
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_REACTION, reactionData));
+        }
+    }
+
+    public void deleteMessage(String uuid, String recipientId) {
+        if (networkClient != null) {
+            Object[] deleteData = new Object[] { uuid, recipientId };
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.DELETE_MESSAGE, deleteData));
+        }
+    }
+
+    public void sendReadReceipt(String contactId) {
+        if (networkClient != null) {
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_READ, contactId));
+        }
     }
 
     public User getCurrentUser() {
@@ -191,6 +272,22 @@ public class ChatManager {
                 case MESSAGE_ACK:
                     if (messageAckListener != null) {
                         messageAckListener.onMessageAck((Message) payload.getData());
+                    }
+                    break;
+                case MESSAGE_READ:
+                    if (messagesReadListener != null) {
+                        messagesReadListener.onMessagesRead((String) payload.getData());
+                    }
+                    break;
+                case DELETE_MESSAGE:
+                    if (messageDeletedListener != null) {
+                        messageDeletedListener.onMessageDeleted((String) payload.getData());
+                    }
+                    break;
+                case MESSAGE_REACTION:
+                    if (messageReactionListener != null) {
+                        Object[] reactionData = (Object[]) payload.getData();
+                        messageReactionListener.onMessageReaction((String) reactionData[0], (String) reactionData[1], (String) reactionData[2]);
                     }
                     break;
                 case CALL_REQUEST:

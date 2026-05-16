@@ -9,6 +9,8 @@ public class User implements Serializable {
     private String username;
     private String phoneNumber;
     private boolean isOnline;
+    private byte[] avatarData;
+    private java.time.LocalDateTime lastSeen;
 
     public User(String id, String username) {
         this.id = id;
@@ -54,6 +56,22 @@ public class User implements Serializable {
 
     public void setOnline(boolean online) {
         isOnline = online;
+    }
+
+    public byte[] getAvatarData() {
+        return avatarData;
+    }
+
+    public void setAvatarData(byte[] avatarData) {
+        this.avatarData = avatarData;
+    }
+
+    public java.time.LocalDateTime getLastSeen() {
+        return lastSeen;
+    }
+
+    public void setLastSeen(java.time.LocalDateTime lastSeen) {
+        this.lastSeen = lastSeen;
     }
 
     @Override

@@ -21,6 +21,14 @@ public class DatabaseManager {
                 stmt.execute("ALTER TABLE users ADD COLUMN phone_number TEXT");
             } catch (SQLException e) {
                 /* ignore if column exists */ }
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN avatar_data BYTEA");
+            } catch (SQLException e) {
+                /* ignore */ }
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN last_seen TEXT");
+            } catch (SQLException e) {
+                /* ignore */ }
 
             // Re-create or Update Contacts table
             stmt.execute(
@@ -49,6 +57,26 @@ public class DatabaseManager {
                 stmt.execute("ALTER TABLE messages ADD COLUMN file_data BYTEA");
             } catch (SQLException e) {
                 /* ignore */ }
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN parent_message_id TEXT");
+            } catch (SQLException e) {
+                /* ignore */ }
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN parent_message_content TEXT");
+            } catch (SQLException e) { /* ignore */ }
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN link_title TEXT");
+                stmt.execute("ALTER TABLE messages ADD COLUMN link_description TEXT");
+                stmt.execute("ALTER TABLE messages ADD COLUMN link_image_url TEXT");
+            } catch (SQLException e) { /* ignore */ }
+
+            stmt.execute("CREATE TABLE IF NOT EXISTS message_reactions (" +
+                    "message_uuid TEXT NOT NULL, " +
+                    "user_id TEXT NOT NULL, " +
+                    "emoji TEXT NOT NULL, " +
+                    "PRIMARY KEY (message_uuid, user_id), " +
+                    "FOREIGN KEY (message_uuid) REFERENCES messages(message_uuid) ON DELETE CASCADE" +
+                    ")");
 
             // For testing setup
             stmt.execute(

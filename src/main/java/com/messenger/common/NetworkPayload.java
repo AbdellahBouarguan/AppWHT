@@ -27,7 +27,11 @@ public class NetworkPayload implements Serializable {
         STATUS_UPDATE,
         LOGOUT_REQUEST,
         MESSAGE_ACK,
-        TYPING_UPDATE
+        TYPING_UPDATE,
+        UPDATE_PROFILE,
+        MESSAGE_READ,
+        DELETE_MESSAGE,
+        MESSAGE_REACTION
     }
 
     private PayloadType type;
