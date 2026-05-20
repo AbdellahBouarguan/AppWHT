@@ -10,9 +10,11 @@ import java.util.function.Consumer;
 import java.awt.image.BufferedImage;
 
 public class MediaCapture {
-    private boolean isCapturing;
+    private volatile boolean isCapturing;
     private StreamSender audioSender;
     private StreamSender videoSender;
+    private volatile boolean audioEnabled = true;
+    private volatile boolean videoEnabled = true;
 
     private TargetDataLine audioLine;
     private OpenCVFrameGrabber grabber;
@@ -51,9 +53,9 @@ public class MediaCapture {
                     System.arraycopy(buffer, 0, data, 0, bytesRead);
 
                     if (amplitudeConsumer != null) {
-                        amplitudeConsumer.accept(calculateAmplitude(data));
+                        amplitudeConsumer.accept(audioEnabled ? calculateAmplitude(data) : 0.0);
                     }
-                    if (audioSender != null) {
+                    if (audioSender != null && audioEnabled) {
                         audioSender.sendData(data);
                     }
                 }
@@ -91,8 +93,8 @@ public class MediaCapture {
 
                     if (data.length < 65000) {
                         if (localConsumer != null)
-                            localConsumer.accept(data);
-                        if (videoSender != null)
+                            localConsumer.accept(videoEnabled ? data : new byte[0]);
+                        if (videoSender != null && videoEnabled)
                             videoSender.sendData(data);
                     }
                 }
@@ -132,4 +134,7 @@ public class MediaCapture {
         if (videoSender != null)
             videoSender.stop();
     }
+
+    public void setAudioEnabled(boolean enabled) { this.audioEnabled = enabled; }
+    public void setVideoEnabled(boolean enabled) { this.videoEnabled = enabled; }
 }

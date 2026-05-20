@@ -9,6 +9,9 @@ public class User implements Serializable {
     private String username;
     private String phoneNumber;
     private boolean isOnline;
+    private byte[] avatarData;
+    private java.time.LocalDateTime lastSeen;
+    private String relationshipStatus; // "PENDING", "ACCEPTED", "BLOCKED"
 
     public User(String id, String username) {
         this.id = id;
@@ -56,9 +59,33 @@ public class User implements Serializable {
         isOnline = online;
     }
 
+    public byte[] getAvatarData() {
+        return avatarData;
+    }
+
+    public void setAvatarData(byte[] avatarData) {
+        this.avatarData = avatarData;
+    }
+
+    public java.time.LocalDateTime getLastSeen() {
+        return lastSeen;
+    }
+
+    public void setLastSeen(java.time.LocalDateTime lastSeen) {
+        this.lastSeen = lastSeen;
+    }
+
     @Override
     public String toString() {
         return username + (phoneNumber != null && !phoneNumber.isEmpty() ? " (" + phoneNumber + ")" : "")
                 + (isOnline ? " (Online)" : " (Offline)");
+    }
+
+    public String getRelationshipStatus() {
+        return relationshipStatus;
+    }
+
+    public void setRelationshipStatus(String relationshipStatus) {
+        this.relationshipStatus = relationshipStatus;
     }
 }

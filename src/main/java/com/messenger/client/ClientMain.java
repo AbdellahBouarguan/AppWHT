@@ -14,9 +14,15 @@ public class ClientMain extends Application {
         this.primaryStage = primaryStage;
         this.chatManager = new ChatManager();
 
-        LoginView loginView = new LoginView(this, chatManager);
-        Scene scene = new Scene(loginView.getView(), 400, 300);
-        primaryStage.setTitle("Messenger - Login");
+        com.messenger.client.ui.SplashView splashView = new com.messenger.client.ui.SplashView(() -> {
+            LoginView loginView = new LoginView(this, chatManager);
+            Scene loginScene = new Scene(loginView.getView(), 1000, 700);
+            primaryStage.setTitle("WhatsApp Web - Login");
+            primaryStage.setScene(loginScene);
+        });
+
+        Scene scene = new Scene(splashView.getView(), 1000, 700);
+        primaryStage.setTitle("WhatsApp Web");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
