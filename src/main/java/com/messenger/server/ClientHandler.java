@@ -3,6 +3,7 @@ package com.messenger.server;
 import com.messenger.common.Message;
 import com.messenger.common.NetworkPayload;
 import com.messenger.common.User;
+import com.messenger.common.Group;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -88,8 +89,46 @@ public class ClientHandler extends Thread {
                 if (associatedUser != null) {
                     String contactId = (String) payload.getData();
                     MessageDAO msgDao = new MessageDAO();
-                    java.util.List<Message> history = msgDao.getChatHistory(associatedUser.getId(), contactId);
+                    java.util.List<Message> history;
+                    if (new GroupDAO().isGroup(contactId)) {
+                        history = msgDao.getGroupChatHistory(contactId);
+                    } else {
+                        history = msgDao.getChatHistory(associatedUser.getId(), contactId);
+                    }
                     sendPayload(new NetworkPayload(NetworkPayload.PayloadType.FETCH_CHAT_HISTORY_RESPONSE, history));
+                }
+                break;
+
+            case CREATE_GROUP_REQUEST:
+                if (associatedUser != null) {
+                    Object[] groupData = (Object[]) payload.getData();
+                    String gName = (String) groupData[0];
+                    String gDesc = (String) groupData[1];
+                    java.util.List<String> memberIds = (java.util.List<String>) groupData[2];
+
+                    GroupDAO gDao = new GroupDAO();
+                    Group newGroup = gDao.createGroup(gName, associatedUser.getId(), memberIds, gDesc);
+
+                    if (newGroup != null) {
+                        java.util.List<String> allMembers = gDao.getGroupMemberIds(newGroup.getId());
+                        java.util.Map<String, ClientHandler> clientsCopy = new java.util.concurrent.ConcurrentHashMap<>(server.getActiveClients());
+                        
+                        for (String memberId : allMembers) {
+                            ClientHandler handler = clientsCopy.get(memberId);
+                            if (handler != null) {
+                                handler.sendPayload(new NetworkPayload(
+                                        NetworkPayload.PayloadType.CREATE_GROUP_SUCCESS, newGroup));
+                            }
+                        }
+                    }
+                }
+                break;
+
+            case FETCH_GROUPS_REQUEST:
+                if (associatedUser != null) {
+                    java.util.List<Group> groups = new GroupDAO().getGroupsForUser(associatedUser.getId());
+                    sendPayload(new NetworkPayload(
+                            NetworkPayload.PayloadType.FETCH_GROUPS_RESPONSE, groups));
                 }
                 break;
 
@@ -105,9 +144,39 @@ public class ClientHandler extends Thread {
                 }
                 break;
 
+            case BLOCK_CONTACT_REQUEST:
+                if (associatedUser != null) {
+                    String targetId = (String) payload.getData();
+                    dao.updateContactStatus(associatedUser.getId(), targetId, "BLOCKED");
+                    // Refresh contact list for client
+                    java.util.List<User> newContacts = dao.getContactsForUser(associatedUser.getId());
+                    for (User c : newContacts) {
+                        c.setOnline(server.isClientOnline(c.getId()));
+                    }
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.CONTACT_LIST_RESPONSE, newContacts));
+                }
+                break;
+
+            case ACCEPT_CONTACT_REQUEST:
+                if (associatedUser != null) {
+                    String targetId = (String) payload.getData();
+                    dao.updateContactStatus(associatedUser.getId(), targetId, "ACCEPTED");
+                    // Refresh contact list for client
+                    java.util.List<User> newContacts = dao.getContactsForUser(associatedUser.getId());
+                    for (User c : newContacts) {
+                        c.setOnline(server.isClientOnline(c.getId()));
+                    }
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.CONTACT_LIST_RESPONSE, newContacts));
+                }
+                break;
+
             case SEND_MESSAGE:
                 Message msg = (Message) payload.getData();
-                server.routeMessage(msg);
+                if (msg.getGroupId() != null) {
+                    server.routeGroupMessage(msg);
+                } else {
+                    server.routeMessage(msg);
+                }
                 break;
 
             case MESSAGE_ACK:
@@ -142,7 +211,21 @@ public class ClientHandler extends Thread {
                     
                     new MessageDAO().addReaction(msgUuid, associatedUser.getId(), emoji);
                     Object[] routedData = new Object[] { msgUuid, associatedUser.getId(), emoji };
-                    server.routeSignalingPayload(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_REACTION, routedData), recipientId);
+                    
+                    GroupDAO gDao = new GroupDAO();
+                    if (gDao.isGroup(recipientId)) {
+                        java.util.List<String> memberIds = gDao.getGroupMemberIds(recipientId);
+                        java.util.Map<String, ClientHandler> clientsCopy = new java.util.concurrent.ConcurrentHashMap<>(server.getActiveClients());
+                        for (String memberId : memberIds) {
+                            if (memberId.equals(associatedUser.getId())) continue;
+                            ClientHandler h = clientsCopy.get(memberId);
+                            if (h != null) {
+                                h.sendPayload(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_REACTION, routedData));
+                            }
+                        }
+                    } else {
+                        server.routeSignalingPayload(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_REACTION, routedData), recipientId);
+                    }
                 }
                 break;
 
@@ -193,6 +276,81 @@ public class ClientHandler extends Thread {
                 server.routeSignalingPayload(payload, receiverId);
                 break;
 
+            case GROUP_CALL_JOIN_REQUEST:
+                if (associatedUser != null) {
+                    String gId = (String) payload.getData();
+                    boolean wasCallActive = server.getActiveGroupCalls().containsKey(gId);
+                    GroupCallSession callSession = server.getOrCreateGroupCall(gId);
+                    
+                    // Add this user to the call session
+                    callSession.addParticipant(associatedUser);
+                    
+                    // Respond with success containing the allocated media ports and server IP
+                    Object[] responseData = new Object[] {
+                        gId,
+                        callSession.getAudioPort(),
+                        callSession.getVideoPort(),
+                        callSession.getActiveParticipants()
+                    };
+                    
+                    sendPayload(new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_JOIN_SUCCESS, responseData));
+                    
+                    // Broadcast a state update to all online members of the group
+                    java.util.List<String> memberIds = new GroupDAO().getGroupMemberIds(gId);
+                    java.util.Map<String, ClientHandler> clientsCopy = new java.util.concurrent.ConcurrentHashMap<>(server.getActiveClients());
+                    Object[] updateData = new Object[] { gId, callSession.getActiveParticipants() };
+                    NetworkPayload updatePayload = new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_STATE_UPDATE, updateData);
+                    
+                    for (String memberId : memberIds) {
+                        ClientHandler handler = clientsCopy.get(memberId);
+                        if (handler != null) {
+                            handler.sendPayload(updatePayload);
+                        }
+                    }
+
+                    // If call just started, broadcast GROUP_CALL_STARTED to other online members
+                    if (!wasCallActive) {
+                        NetworkPayload startPayload = new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_STARTED, gId);
+                        for (String memberId : memberIds) {
+                            if (memberId.equals(associatedUser.getId())) continue;
+                            ClientHandler handler = clientsCopy.get(memberId);
+                            if (handler != null) {
+                                handler.sendPayload(startPayload);
+                            }
+                        }
+                        
+                        // Notify offline and online members with a persistent chat message
+                        Message sysMsg = new Message(associatedUser, (User)null, "started a group video call 📞");
+                        sysMsg.setGroupId(gId);
+                        server.routeGroupMessage(sysMsg);
+                    }
+                }
+                break;
+
+            case GROUP_CALL_LEAVE_REQUEST:
+                if (associatedUser != null) {
+                    String gId = (String) payload.getData();
+                    server.removeGroupCallParticipant(gId, associatedUser.getId());
+                    
+                    // Check if session still exists
+                    GroupCallSession callSession = server.getActiveGroupCalls().get(gId);
+                    java.util.List<User> activeParticipants = callSession != null ? callSession.getActiveParticipants() : new java.util.ArrayList<>();
+                    
+                    // Broadcast state update
+                    java.util.List<String> memberIds = new GroupDAO().getGroupMemberIds(gId);
+                    java.util.Map<String, ClientHandler> clientsCopy = new java.util.concurrent.ConcurrentHashMap<>(server.getActiveClients());
+                    Object[] updateData = new Object[] { gId, activeParticipants };
+                    NetworkPayload updatePayload = new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_STATE_UPDATE, updateData);
+                    
+                    for (String memberId : memberIds) {
+                        ClientHandler handler = clientsCopy.get(memberId);
+                        if (handler != null) {
+                            handler.sendPayload(updatePayload);
+                        }
+                    }
+                }
+                break;
+
             default:
                 break;
         }
@@ -201,6 +359,7 @@ public class ClientHandler extends Thread {
     public void sendPayload(NetworkPayload payload) {
         try {
             if (out != null) {
+                out.reset();
                 out.writeObject(payload);
                 out.flush();
             }
@@ -215,6 +374,27 @@ public class ClientHandler extends Thread {
             associatedUser.setLastSeen(now);
             new UserDAO().updateUserLastSeen(associatedUser.getId(), now);
             associatedUser.setOnline(false);
+            
+            // Cleanup: remove from any active group call session
+            for (String gId : new java.util.ArrayList<>(server.getActiveGroupCalls().keySet())) {
+                server.removeGroupCallParticipant(gId, associatedUser.getId());
+                
+                GroupCallSession callSession = server.getActiveGroupCalls().get(gId);
+                java.util.List<User> activeParticipants = callSession != null ? callSession.getActiveParticipants() : new java.util.ArrayList<>();
+                
+                // Broadcast state update
+                java.util.List<String> memberIds = new GroupDAO().getGroupMemberIds(gId);
+                java.util.Map<String, ClientHandler> clientsCopy = new java.util.concurrent.ConcurrentHashMap<>(server.getActiveClients());
+                Object[] updateData = new Object[] { gId, activeParticipants };
+                NetworkPayload updatePayload = new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_STATE_UPDATE, updateData);
+                
+                for (String memberId : memberIds) {
+                    ClientHandler handler = clientsCopy.get(memberId);
+                    if (handler != null) {
+                        handler.sendPayload(updatePayload);
+                    }
+                }
+            }
             
             // 1. Remove from active clients map first so broadcast doesn't include this user
             server.removeClient(this);

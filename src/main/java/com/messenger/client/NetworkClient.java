@@ -55,9 +55,19 @@ public class NetworkClient {
         sendData(new NetworkPayload(NetworkPayload.PayloadType.ADD_CONTACT_REQUEST, contactId));
     }
 
+    public void createGroup(String name, String description, java.util.List<String> memberIds) {
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.CREATE_GROUP_REQUEST,
+                new Object[] { name, description, memberIds }));
+    }
+
+    public void fetchGroups() {
+        sendData(new NetworkPayload(NetworkPayload.PayloadType.FETCH_GROUPS_REQUEST, null));
+    }
+
     public void sendData(NetworkPayload payload) {
         try {
             if (out != null) {
+                out.reset();
                 out.writeObject(payload);
                 out.flush();
             }
@@ -91,5 +101,9 @@ public class NetworkClient {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    public String getServerIp() {
+        return serverIp;
     }
 }

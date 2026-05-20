@@ -16,12 +16,12 @@ public class ClientMain extends Application {
 
         com.messenger.client.ui.SplashView splashView = new com.messenger.client.ui.SplashView(() -> {
             LoginView loginView = new LoginView(this, chatManager);
-            Scene loginScene = new Scene(loginView.getView(), 400, 300);
+            Scene loginScene = new Scene(loginView.getView(), 1000, 700);
             primaryStage.setTitle("WhatsApp Web - Login");
             primaryStage.setScene(loginScene);
         });
 
-        Scene scene = new Scene(splashView.getView(), 800, 600);
+        Scene scene = new Scene(splashView.getView(), 1000, 700);
         primaryStage.setTitle("WhatsApp Web");
         primaryStage.setScene(scene);
         primaryStage.show();

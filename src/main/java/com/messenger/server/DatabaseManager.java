@@ -6,7 +6,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 public class DatabaseManager {
-    private static final String URL = "jdbc:postgresql://localhost:5432/messenger?user=postgres&password=postgres";
+    private static final String URL = "jdbc:postgresql://localhost:5432/messenger?user=postgres&password=postgres&sslmode=disable";
 
     public static Connection getConnection() throws SQLException {
         return DriverManager.getConnection(URL);
@@ -33,6 +33,9 @@ public class DatabaseManager {
             // Re-create or Update Contacts table
             stmt.execute(
                     "CREATE TABLE IF NOT EXISTS contacts (user_id TEXT, contact_id TEXT, PRIMARY KEY(user_id, contact_id))");
+            try {
+                stmt.execute("ALTER TABLE contacts ADD COLUMN status TEXT DEFAULT 'ACCEPTED'");
+            } catch (SQLException e) { /* ignore */ }
 
             // Re-create or Update Messages table
             stmt.execute(
@@ -77,6 +80,22 @@ public class DatabaseManager {
                     "PRIMARY KEY (message_uuid, user_id), " +
                     "FOREIGN KEY (message_uuid) REFERENCES messages(message_uuid) ON DELETE CASCADE" +
                     ")");
+
+            // Re-create or Update Groups, Members, and Receipts tables
+            stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, admin_id TEXT NOT NULL, description TEXT, created_at TEXT NOT NULL, avatar_data BYTEA)");
+            
+            stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS group_members (group_id TEXT, user_id TEXT, PRIMARY KEY (group_id, user_id), FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)");
+            
+            stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS group_message_receipts (message_uuid TEXT, user_id TEXT, status INT DEFAULT 0, PRIMARY KEY (message_uuid, user_id), FOREIGN KEY (message_uuid) REFERENCES messages(message_uuid) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)");
+
+            try {
+                stmt.execute("ALTER TABLE messages ADD COLUMN group_id TEXT");
+            } catch (SQLException e) {
+                /* ignore if column exists */
+            }
 
             // For testing setup
             stmt.execute(

@@ -20,6 +20,25 @@ public class ChatManager {
     private ChatHistoryListener chatHistoryListener;
     private Object[] latestCallData;
 
+    public interface GroupCallListener {
+        void onGroupCallJoinSuccess(String groupId, int audioPort, int videoPort, List<User> activeParticipants);
+        void onGroupCallStateUpdated(String groupId, List<User> activeParticipants);
+        void onGroupCallStarted(String groupId);
+    }
+
+    private GroupCallListener groupCallListener;
+
+    public interface GroupListListener {
+        void onGroupListUpdated(List<com.messenger.common.Group> groups);
+    }
+
+    public interface GroupCreatedListener {
+        void onGroupCreated(com.messenger.common.Group group);
+    }
+
+    private GroupListListener groupListListener;
+    private GroupCreatedListener groupCreatedListener;
+    
     private NetworkClient networkClient;
     private User currentUser;
 
@@ -56,6 +75,35 @@ public class ChatManager {
         }
     }
 
+    public void fetchGroups() {
+        if (networkClient != null) {
+            networkClient.fetchGroups();
+        }
+    }
+
+    public void createGroup(String name, String description, List<String> memberIds) {
+        if (networkClient != null) {
+            networkClient.createGroup(name, description, memberIds);
+        }
+    }
+
+    public com.messenger.common.Message sendGroupMessage(String groupId, String text, String fileName, byte[] fileData, com.messenger.common.Message parentMsg) {
+        com.messenger.common.Message msg = new com.messenger.common.Message(currentUser, groupId, text);
+        if (parentMsg != null) {
+            msg.setParentMessageId(parentMsg.getId());
+            msg.setParentMessageContent(parentMsg.getContent());
+        }
+        if (fileName != null) msg.setFileName(fileName);
+        if (fileData != null) msg.setFileData(fileData);
+        
+        networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
+        return msg;
+    }
+
+    public com.messenger.common.Message sendGroupMessage(String groupId, String text, com.messenger.common.Message parentMsg) {
+        return sendGroupMessage(groupId, text, null, null, parentMsg);
+    }
+
     public void fetchChatHistory(User contact) {
         if (networkClient != null) {
             networkClient.sendData(
@@ -66,6 +114,18 @@ public class ChatManager {
     public void sendDirectMessage(com.messenger.common.Message msg) {
         if (networkClient != null) {
             networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.SEND_MESSAGE, msg));
+        }
+    }
+
+    public void blockUser(String contactId) {
+        if (networkClient != null) {
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.BLOCK_CONTACT_REQUEST, contactId));
+        }
+    }
+
+    public void acceptUser(String contactId) {
+        if (networkClient != null) {
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.ACCEPT_CONTACT_REQUEST, contactId));
         }
     }
 
@@ -122,6 +182,22 @@ public class ChatManager {
     public void endCall(User receiver) {
         Object[] callData = new Object[] { receiver.getId(), CallType.AUDIO }; // type doesn't matter for end
         networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.END_CALL, callData));
+    }
+
+    public void joinGroupCall(String groupId) {
+        if (networkClient != null) {
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_JOIN_REQUEST, groupId));
+        }
+    }
+
+    public void leaveGroupCall(String groupId) {
+        if (networkClient != null) {
+            networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.GROUP_CALL_LEAVE_REQUEST, groupId));
+        }
+    }
+
+    public NetworkClient getNetworkClient() {
+        return networkClient;
     }
 
     public void setOnLoginSuccess(Runnable onLoginSuccess) {
@@ -181,6 +257,10 @@ public class ChatManager {
         this.callListener = callListener;
     }
 
+    public void setGroupCallListener(GroupCallListener listener) {
+        this.groupCallListener = listener;
+    }
+
     public void setTypingListener(TypingListener typingListener) {
         this.typingListener = typingListener;
     }
@@ -199,6 +279,14 @@ public class ChatManager {
 
     public void setMessageDeletedListener(MessageDeletedListener listener) {
         this.messageDeletedListener = listener;
+    }
+
+    public void setGroupListListener(GroupListListener listener) {
+        this.groupListListener = listener;
+    }
+
+    public void setGroupCreatedListener(GroupCreatedListener listener) {
+        this.groupCreatedListener = listener;
     }
 
     public void setMessageReactionListener(MessageReactionListener listener) {
@@ -240,6 +328,7 @@ public class ChatManager {
                         if (onLoginSuccess != null)
                             onLoginSuccess.run();
                         fetchContacts(); // Automatically fetch contacts on auth success
+                        fetchGroups();   // Automatically fetch groups on auth success
                     } else {
                         if (onLoginFailed != null)
                             onLoginFailed.run();
@@ -316,12 +405,54 @@ public class ChatManager {
                         }
                     }
                     break;
+                case GROUP_CALL_JOIN_SUCCESS:
+                    if (groupCallListener != null) {
+                        Object[] data = (Object[]) payload.getData();
+                        String gId = (String) data[0];
+                        int audioPort = (Integer) data[1];
+                        int videoPort = (Integer) data[2];
+                        List<User> participants = (List<User>) data[3];
+                        groupCallListener.onGroupCallJoinSuccess(gId, audioPort, videoPort, participants);
+                    }
+                    break;
+                case GROUP_CALL_STATE_UPDATE:
+                    if (groupCallListener != null) {
+                        Object[] data = (Object[]) payload.getData();
+                        String gId = (String) data[0];
+                        List<User> participants = (List<User>) data[1];
+                        groupCallListener.onGroupCallStateUpdated(gId, participants);
+                    }
+                    break;
+                case GROUP_CALL_STARTED:
+                    if (groupCallListener != null) {
+                        groupCallListener.onGroupCallStarted((String) payload.getData());
+                    }
+                    break;
                 case TYPING_UPDATE:
                     if (typingListener != null) {
                         Object[] typingData = (Object[]) payload.getData();
                         String senderId = (String) typingData[0];
-                        boolean isTyping = (Boolean) typingData[1];
-                        typingListener.onTypingUpdate(senderId, isTyping);
+                        String targetId = typingData.length > 2 ? (String) typingData[1] : senderId;
+                        boolean isTyping = typingData.length > 2 ? (Boolean) typingData[2] : (Boolean) typingData[1];
+                        typingListener.onTypingUpdate(senderId, targetId, isTyping);
+                    }
+                    break;
+                case FETCH_GROUPS_RESPONSE:
+                    if (groupListListener != null) {
+                        groupListListener.onGroupListUpdated((List<com.messenger.common.Group>) payload.getData());
+                    }
+                    break;
+                case CREATE_GROUP_SUCCESS:
+                    if (groupCreatedListener != null) {
+                        groupCreatedListener.onGroupCreated((com.messenger.common.Group) payload.getData());
+                    }
+                    break;
+                case GROUP_MESSAGE_RECEIVE:
+                    Message recvGroupMsg = (Message) payload.getData();
+                    recvGroupMsg.setStatus(Message.MessageStatus.DELIVERED_TO_CLIENT);
+                    networkClient.sendData(new NetworkPayload(NetworkPayload.PayloadType.MESSAGE_ACK, recvGroupMsg));
+                    if (messageListener != null) {
+                        messageListener.onMessageReceived(recvGroupMsg);
                     }
                     break;
                 default:
@@ -353,7 +484,7 @@ public class ChatManager {
     }
 
     public interface TypingListener {
-        void onTypingUpdate(String senderId, boolean isTyping);
+        void onTypingUpdate(String senderId, String targetId, boolean isTyping);
     }
 
     public void sendTypingUpdate(String receiverId, boolean isTyping) {

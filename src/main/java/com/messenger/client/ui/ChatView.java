@@ -3,6 +3,7 @@ package com.messenger.client.ui;
 import com.messenger.client.ChatManager;
 import com.messenger.client.ClientMain;
 import com.messenger.common.User;
+import java.util.List;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.scene.control.*;
@@ -17,10 +18,13 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChatView {
     private BorderPane view;
     private ChatManager chatManager;
-    private ListView<User> usersList;
+    private ListView<Object> usersList;
     private VBox chatArea;
     private ScrollPane chatScroll;
     private User selectedUser;
+    private com.messenger.common.Group selectedGroup;
+    private java.util.List<User> localContacts = new java.util.ArrayList<>();
+    private java.util.List<com.messenger.common.Group> localGroups = new java.util.ArrayList<>();
 
     private com.messenger.client.media.MediaCapture mediaCapture;
     private com.messenger.client.media.StreamReceiver audioReceiver;
@@ -37,11 +41,18 @@ public class ChatView {
     private boolean isCameraOff = false;
 
     private javafx.scene.layout.StackPane rootPane;
+    private final java.util.Map<String, java.util.List<User>> activeGroupCallMembers = new java.util.concurrent.ConcurrentHashMap<>();
+    private GroupCallView activeCallView;
+    private Label contactStatus;
     private HBox typingIndicatorBubble;
     private VBox replyPreviewContainer;
     private VBox linkPreviewArea;
     private com.messenger.client.util.LinkPreviewService.LinkMetadata currentLinkMetadata;
     private com.messenger.common.Message replyingToMessage;
+    private Button audioCallBtn;
+    private Button videoCallBtn;
+    private Button endCallBtn;
+    private Button joinCallBtn;
 
     public ChatView(ClientMain mainApp, ChatManager chatManager) {
         this.chatManager = chatManager;
@@ -63,27 +74,46 @@ public class ChatView {
         sidebarHeader.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         sidebarHeader.setPadding(new javafx.geometry.Insets(0, 16, 0, 16));
 
-        javafx.scene.shape.Circle myAvatar = new javafx.scene.shape.Circle(20, javafx.scene.paint.Color.web("#6b7c85"));
-        myAvatar.setCursor(javafx.scene.Cursor.HAND);
-        myAvatar.setOnMouseClicked(e -> {
+        javafx.scene.layout.StackPane myAvatarStack = createAvatarWithSilhouette(20);
+        myAvatarStack.setCursor(javafx.scene.Cursor.HAND);
+        myAvatarStack.setOnMouseClicked(e -> {
             javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
             fc.setTitle("Select Profile Picture");
+            fc.getExtensionFilters().addAll(
+                new javafx.stage.FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg", "*.gif")
+            );
             java.io.File file = fc.showOpenDialog(view.getScene().getWindow());
             if (file != null) {
+                if (file.length() > 5 * 1024 * 1024) {
+                    addSystemMessage("Image is too large. Limit is 5MB.");
+                    return;
+                }
                 try {
-                    javafx.scene.image.Image img = new javafx.scene.image.Image(file.toURI().toString());
-                    myAvatar.setFill(new javafx.scene.paint.ImagePattern(img));
+                    byte[] fileData = java.nio.file.Files.readAllBytes(file.toPath());
+                    applyAvatarImage(myAvatarStack, fileData);
                     chatManager.updateProfilePicture(file);
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
             }
         });
+        
+        if (chatManager.getCurrentUser() != null && chatManager.getCurrentUser().getAvatarData() != null) {
+            applyAvatarImage(myAvatarStack, chatManager.getCurrentUser().getAvatarData());
+        }
 
         Label myNameLabel = new Label(" Messenger");
         myNameLabel.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
         myNameLabel.setFont(javafx.scene.text.Font.font("System", javafx.scene.text.FontWeight.BOLD, 16));
-        sidebarHeader.getChildren().addAll(myAvatar, myNameLabel);
+        
+        Region headerSpacerLeft = new Region();
+        HBox.setHgrow(headerSpacerLeft, Priority.ALWAYS);
+        
+        Button newGroupBtn = new Button("New Group");
+        newGroupBtn.setStyle("-fx-background-color: #00a884; -fx-text-fill: #111b21; -fx-font-weight: bold; -fx-background-radius: 12; -fx-cursor: hand; -fx-font-size: 11; -fx-padding: 5 10 5 10;");
+        newGroupBtn.setOnAction(e -> openNewGroupModal());
+        
+        sidebarHeader.getChildren().addAll(myAvatarStack, myNameLabel, headerSpacerLeft, newGroupBtn);
 
         // Sidebar Search / Add Contact
         HBox searchContainer = new HBox(10);
@@ -115,47 +145,94 @@ public class ChatView {
                 "data:text/css,.list-cell:filled:selected:focused,.list-cell:filled:selected{-fx-background-color: #2a3942;-fx-text-fill:white;} .list-cell{-fx-background-color:transparent;-fx-text-fill:#e9edef;-fx-font-size:16px;-fx-padding:8px;}");
         VBox.setVgrow(usersList, Priority.ALWAYS);
 
-        usersList.setCellFactory(lv -> new javafx.scene.control.ListCell<com.messenger.common.User>() {
+        usersList.setCellFactory(lv -> new javafx.scene.control.ListCell<Object>() {
             @Override
-            protected void updateItem(com.messenger.common.User user, boolean empty) {
-                super.updateItem(user, empty);
-                if (empty || user == null) {
+            protected void updateItem(Object item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
                     setText(null);
                     setGraphic(null);
                 } else {
                     HBox box = new HBox(12);
                     box.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-                    javafx.scene.shape.Circle avatar = new javafx.scene.shape.Circle(24,
-                            javafx.scene.paint.Color.web("#6b7c85"));
-                    if (user.getAvatarData() != null) {
-                        try {
-                            javafx.scene.image.Image img = new javafx.scene.image.Image(
-                                    new java.io.ByteArrayInputStream(user.getAvatarData()));
-                            avatar.setFill(new javafx.scene.paint.ImagePattern(img));
-                        } catch (Exception e) {
+                    
+                    if (item instanceof User) {
+                        User user = (User) item;
+                        javafx.scene.layout.StackPane avatar = createAvatarWithSilhouette(24);
+                        if (user.getAvatarData() != null) {
+                            applyAvatarImage(avatar, user.getAvatarData());
                         }
-                    }
-                    VBox texts = new VBox(2);
-                    Label nameLbl = new Label(user.getUsername());
-                    nameLbl.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
-                    nameLbl.setFont(javafx.scene.text.Font.font("System", javafx.scene.text.FontWeight.BOLD, 15));
+                        VBox texts = new VBox(2);
+                        Label nameLbl = new Label(user.getUsername());
+                        nameLbl.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
+                        nameLbl.setFont(javafx.scene.text.Font.font("System", javafx.scene.text.FontWeight.BOLD, 15));
 
-                    String statusText = user.isOnline() ? "Online" : formatLastSeen(user.getLastSeen());
-                    Label subLbl = new Label(statusText);
-                    subLbl.setTextFill(user.isOnline() ? javafx.scene.paint.Color.web("#00a884")
-                            : javafx.scene.paint.Color.web("#8696a0"));
-                    subLbl.setFont(javafx.scene.text.Font.font("System", 13));
-                    texts.getChildren().addAll(nameLbl, subLbl);
-                    box.getChildren().addAll(avatar, texts);
+                        String statusText = user.isOnline() ? "Online" : formatLastSeen(user.getLastSeen());
+                        if ("PENDING".equals(user.getRelationshipStatus())) {
+                            statusText = "New Message (Pending)";
+                        }
+                        Label subLbl = new Label(statusText);
+                        subLbl.setTextFill("PENDING".equals(user.getRelationshipStatus()) ? javafx.scene.paint.Color.web("#f15c6d")
+                                : (user.isOnline() ? javafx.scene.paint.Color.web("#00a884") : javafx.scene.paint.Color.web("#8696a0")));
+                        subLbl.setFont(javafx.scene.text.Font.font("System", 13));
+                        
+                        if ("PENDING".equals(user.getRelationshipStatus())) {
+                            nameLbl.setText(user.getUsername() + " (New)");
+                            nameLbl.setTextFill(javafx.scene.paint.Color.web("#53bdeb"));
+                        }
+                        texts.getChildren().addAll(nameLbl, subLbl);
+                        box.getChildren().addAll(avatar, texts);
+                    } else if (item instanceof com.messenger.common.Group) {
+                        com.messenger.common.Group group = (com.messenger.common.Group) item;
+                        
+                        javafx.scene.layout.StackPane groupAvatar = new javafx.scene.layout.StackPane();
+                        javafx.scene.shape.Circle avatarCircle = new javafx.scene.shape.Circle(24,
+                                javafx.scene.paint.Color.web("#005c4b"));
+                        
+                        Label letterLabel = new Label(group.getName().isEmpty() ? "?" : group.getName().substring(0, 1).toUpperCase());
+                        letterLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 16;");
+                        
+                        groupAvatar.getChildren().addAll(avatarCircle, letterLabel);
+                        
+                        if (group.getGroupAvatar() != null) {
+                            try {
+                                javafx.scene.image.Image img = new javafx.scene.image.Image(
+                                        new java.io.ByteArrayInputStream(group.getGroupAvatar()));
+                                if (!img.isError()) {
+                                    avatarCircle.setFill(new javafx.scene.paint.ImagePattern(img));
+                                    letterLabel.setVisible(false);
+                                }
+                            } catch (Exception e) {}
+                        }
+                        
+                        VBox texts = new VBox(2);
+                        Label nameLbl = new Label(group.getName());
+                        nameLbl.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
+                        nameLbl.setFont(javafx.scene.text.Font.font("System", javafx.scene.text.FontWeight.BOLD, 15));
+
+                        int membersCount = group.getMembers() != null ? group.getMembers().size() : 0;
+                        Label subLbl = new Label("Group • " + membersCount + " members");
+                        subLbl.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+                        subLbl.setFont(javafx.scene.text.Font.font("System", 13));
+                        
+                        texts.getChildren().addAll(nameLbl, subLbl);
+                        box.getChildren().addAll(groupAvatar, texts);
+                    }
                     setGraphic(box);
                 }
             }
         });
         usersList.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
-            selectedUser = newV;
-            if (selectedUser != null) {
+            if (newV instanceof User) {
+                selectedUser = (User) newV;
+                selectedGroup = null;
                 chatArea.getChildren().clear();
                 chatManager.fetchChatHistory(selectedUser);
+            } else if (newV instanceof com.messenger.common.Group) {
+                selectedGroup = (com.messenger.common.Group) newV;
+                selectedUser = null;
+                chatArea.getChildren().clear();
+                chatManager.fetchChatHistory(new User(selectedGroup.getId(), ""));
             }
         });
 
@@ -174,13 +251,12 @@ public class ChatView {
         chatHeader.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         chatHeader.setPadding(new javafx.geometry.Insets(0, 16, 0, 16));
 
-        javafx.scene.shape.Circle contactAvatar = new javafx.scene.shape.Circle(20,
-                javafx.scene.paint.Color.web("#6b7c85"));
+        javafx.scene.layout.StackPane contactAvatar = createAvatarWithSilhouette(20);
         Label contactName = new Label("Select a contact");
         contactName.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
         contactName.setFont(javafx.scene.text.Font.font("System", javafx.scene.text.FontWeight.BOLD, 16));
 
-        Label contactStatus = new Label("");
+        contactStatus = new Label("");
         contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
         contactStatus.setFont(javafx.scene.text.Font.font("System", 13));
 
@@ -194,7 +270,7 @@ public class ChatView {
         audioIcon.setContent(
                 "M18.48,15.76C18.48,15.76,16.59,14.65,16.14,14.45C15.68,14.24,15.25,14.36,14.97,14.73C14.68,15.11,13.88,16.09,13.6,16.42C13.31,16.74,13.01,16.78,12.56,16.55C12.1,16.32,10.65,15.22,9.33,13.78C8.28,12.63,7.57,11.13,7.29,10.67C7.01,10.21,7.26,9.96,7.49,9.73C7.69,9.53,7.94,9.22,8.17,8.96C8.4,8.7,8.48,8.51,8.63,8.21C8.78,7.91,8.71,7.63,8.59,7.4C8.48,7.17,7.78,5.46,7.48,4.72C7.2,4.01,6.91,4.1,6.7,4.09C6.51,4.08,6.21,4.08,5.9,4.08C5.6,4.08,5.11,4.19,4.69,4.64C4.28,5.09,3.14,6.15,3.14,8.32C3.14,10.5,4.74,12.58,4.96,12.89C5.19,13.19,8.08,17.65,12.51,19.56C13.56,20.02,14.39,20.29,15.03,20.5C16.08,20.83,17.03,20.78,17.78,20.67C18.61,20.55,20.35,19.64,20.72,18.63C21.1,17.62,21.1,16.74,20.98,16.55C20.87,16.36,20.57,16.24,20.11,16.01L18.48,15.76Z");
         audioIcon.setFill(javafx.scene.paint.Color.web("#aebac1"));
-        Button audioCallBtn = new Button("", audioIcon);
+        audioCallBtn = new Button("", audioIcon);
         audioCallBtn.setStyle("-fx-background-color: transparent; -fx-cursor: hand;");
         audioCallBtn.setOnMouseEntered(e -> audioIcon.setFill(javafx.scene.paint.Color.web("#e9edef")));
         audioCallBtn.setOnMouseExited(e -> audioIcon.setFill(javafx.scene.paint.Color.web("#aebac1")));
@@ -203,7 +279,7 @@ public class ChatView {
         videoIcon.setContent(
                 "M20.26,7.8L16,10.22V8c0-1.1-0.9-2-2-2H4C2.9,6,2,6.9,2,8v8c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2v-2.22l4.26,2.42C20.7,16.44,21,16.12,21,15.64V8.36C21,7.88,20.7,7.56,20.26,7.8z");
         videoIcon.setFill(javafx.scene.paint.Color.web("#aebac1"));
-        Button videoCallBtn = new Button("", videoIcon);
+        videoCallBtn = new Button("", videoIcon);
         videoCallBtn.setStyle("-fx-background-color: transparent; -fx-cursor: hand;");
         videoCallBtn.setOnMouseEntered(e -> videoIcon.setFill(javafx.scene.paint.Color.web("#e9edef")));
         videoCallBtn.setOnMouseExited(e -> videoIcon.setFill(javafx.scene.paint.Color.web("#aebac1")));
@@ -211,10 +287,21 @@ public class ChatView {
         javafx.scene.shape.SVGPath endCallIcon = new javafx.scene.shape.SVGPath();
         endCallIcon.setContent("M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M17,13H7v-2h10V13z");
         endCallIcon.setFill(javafx.scene.paint.Color.web("#f15c6d"));
-        Button endCallBtn = new Button("", endCallIcon);
+        endCallBtn = new Button("", endCallIcon);
         endCallBtn.setStyle("-fx-background-color: transparent; -fx-cursor: hand;");
 
-        chatHeader.getChildren().addAll(contactAvatar, nameBox, headerSpacer, audioCallBtn, videoCallBtn, endCallBtn);
+        joinCallBtn = new Button("Join Call");
+        joinCallBtn.setStyle("-fx-background-color: #25D366; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 14; -fx-cursor: hand; -fx-font-size: 13; -fx-padding: 6 14 6 14;");
+        joinCallBtn.setVisible(false);
+        joinCallBtn.setManaged(false);
+        joinCallBtn.setOnAction(e -> {
+            if (selectedGroup != null) {
+                chatManager.joinGroupCall(selectedGroup.getId());
+                addSystemMessage("Joining group call for " + selectedGroup.getName() + "...");
+            }
+        });
+
+        chatHeader.getChildren().addAll(contactAvatar, nameBox, headerSpacer, audioCallBtn, videoCallBtn, endCallBtn, joinCallBtn);
 
         // Messages Area (Using VBox and ScrollPane for bubbles)
         chatArea = new VBox(8);
@@ -293,7 +380,7 @@ public class ChatView {
         micBtn.setStyle("-fx-background-color: transparent; -fx-cursor: hand;");
 
         micBtn.setOnMousePressed(e -> {
-            if (selectedUser != null) {
+            if (selectedUser != null || selectedGroup != null) {
                 try {
                     voiceRecorder.start();
                     micIcon.setFill(javafx.scene.paint.Color.RED);
@@ -309,9 +396,14 @@ public class ChatView {
                 byte[] audio = voiceRecorder.stop();
                 micIcon.setFill(javafx.scene.paint.Color.web("#8696a0"));
                 inputField.setPromptText("Type a message");
-                if (audio != null && audio.length > 500) { // minimum size for a real sound
-                    chatManager.sendMessage(selectedUser.getId(), "[Voice Message]",
-                            "voice_" + System.currentTimeMillis() + ".wav", audio, replyingToMessage);
+                if (audio != null && audio.length > 500) {
+                    if (selectedGroup != null) {
+                        chatManager.sendGroupMessage(selectedGroup.getId(), "[Voice Message]",
+                                "voice_" + System.currentTimeMillis() + ".wav", audio, replyingToMessage);
+                    } else {
+                        chatManager.sendMessage(selectedUser.getId(), "[Voice Message]",
+                                "voice_" + System.currentTimeMillis() + ".wav", audio, replyingToMessage);
+                    }
                     cancelReply();
                 }
             }
@@ -330,43 +422,76 @@ public class ChatView {
         centerPane.getChildren().addAll(chatHeader, chatScroll, replyPreviewContainer, linkPreviewArea, inputBox);
         view.setCenter(centerPane);
 
-        // Update contact name when user selected
         usersList.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
-            if (newV != null) {
-                contactName.setText(newV.getUsername());
-                contactStatus.setText(newV.isOnline() ? "online" : formatLastSeen(newV.getLastSeen()));
-                contactStatus.setTextFill(newV.isOnline() ? javafx.scene.paint.Color.web("#8696a0")
-                        : javafx.scene.paint.Color.web("#8696a0"));
+            if (newV instanceof User) {
+                User u = (User) newV;
+                contactName.setText(u.getUsername());
+                contactStatus.setText(u.isOnline() ? "online" : formatLastSeen(u.getLastSeen()));
+                contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
 
-                if (newV.getAvatarData() != null) {
-                    try {
-                        javafx.scene.image.Image img = new javafx.scene.image.Image(
-                                new java.io.ByteArrayInputStream(newV.getAvatarData()));
-                        contactAvatar.setFill(new javafx.scene.paint.ImagePattern(img));
-                    } catch (Exception e) {
+                applyAvatarImage(contactAvatar, u.getAvatarData());
+                showTypingIndicator(false);
+                audioCallBtn.setVisible(true);
+                audioCallBtn.setManaged(true);
+                videoCallBtn.setVisible(true);
+                videoCallBtn.setManaged(true);
+                joinCallBtn.setVisible(false);
+                joinCallBtn.setManaged(false);
+                endCallBtn.setVisible(false);
+                endCallBtn.setManaged(false);
+            } else if (newV instanceof com.messenger.common.Group) {
+                com.messenger.common.Group g = (com.messenger.common.Group) newV;
+                contactName.setText(g.getName());
+                
+                StringBuilder sb = new StringBuilder();
+                if (g.getMembers() != null) {
+                    for (int i = 0; i < g.getMembers().size(); i++) {
+                        sb.append(g.getMembers().get(i).getUsername());
+                        if (i < g.getMembers().size() - 1) sb.append(", ");
                     }
-                } else {
-                    contactAvatar.setFill(javafx.scene.paint.Color.web("#6b7c85"));
                 }
-                showTypingIndicator(false); // Clear typing indicator for previous user
+                contactStatus.setText(sb.toString());
+                contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+
+                applyAvatarImage(contactAvatar, g.getGroupAvatar());
+                showTypingIndicator(false);
+                audioCallBtn.setVisible(true);
+                audioCallBtn.setManaged(true);
+                videoCallBtn.setVisible(true);
+                videoCallBtn.setManaged(true);
+                joinCallBtn.setVisible(false);
+                joinCallBtn.setManaged(false);
+                endCallBtn.setVisible(false);
+                endCallBtn.setManaged(false);
+                
+                java.util.List<User> activeCallUsers = activeGroupCallMembers.get(g.getId());
+                if (activeCallUsers != null && !activeCallUsers.isEmpty()) {
+                    updateHeaderBarForGroup(g.getId(), activeCallUsers);
+                } else {
+                    updateHeaderBarForGroup(g.getId(), new java.util.ArrayList<>());
+                }
             }
         });
 
-        // Events
         sendBtn.setOnAction(e -> {
-            if (selectedUser != null && !inputField.getText().isEmpty()) {
-                com.messenger.common.Message msg = new com.messenger.common.Message(chatManager.getCurrentUser(),
-                        selectedUser, inputField.getText());
-                if (replyingToMessage != null) {
-                    msg.setParentMessageId(replyingToMessage.getId());
-                    msg.setParentMessageContent(replyingToMessage.getContent());
+            if ((selectedUser != null || selectedGroup != null) && !inputField.getText().isEmpty()) {
+                com.messenger.common.Message msg;
+                if (selectedGroup != null) {
+                    msg = chatManager.sendGroupMessage(selectedGroup.getId(), inputField.getText(), replyingToMessage);
+                } else {
+                    msg = new com.messenger.common.Message(chatManager.getCurrentUser(),
+                            selectedUser, inputField.getText());
+                    if (replyingToMessage != null) {
+                        msg.setParentMessageId(replyingToMessage.getId());
+                        msg.setParentMessageContent(replyingToMessage.getContent());
+                    }
+                    if (currentLinkMetadata != null) {
+                        msg.setLinkTitle(currentLinkMetadata.title);
+                        msg.setLinkDescription(currentLinkMetadata.description);
+                        msg.setLinkImageUrl(currentLinkMetadata.imageUrl);
+                    }
+                    chatManager.sendDirectMessage(msg);
                 }
-                if (currentLinkMetadata != null) {
-                    msg.setLinkTitle(currentLinkMetadata.title);
-                    msg.setLinkDescription(currentLinkMetadata.description);
-                    msg.setLinkImageUrl(currentLinkMetadata.imageUrl);
-                }
-                chatManager.sendDirectMessage(msg);
                 addMessageBubble(msg, true);
                 inputField.clear();
                 cancelReply();
@@ -377,7 +502,7 @@ public class ChatView {
         inputField.setOnAction(e -> sendBtn.fire());
 
         attachBtn.setOnAction(e -> {
-            if (selectedUser == null)
+            if (selectedUser == null && selectedGroup == null)
                 return;
             javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
             fileChooser.setTitle("Select File to Send");
@@ -387,8 +512,18 @@ public class ChatView {
                     addSystemMessage("File too large. Limit is 5MB.");
                     return;
                 }
-                com.messenger.common.Message msg = chatManager.sendFileMessage(selectedUser, inputField.getText(), file,
-                        replyingToMessage);
+                com.messenger.common.Message msg;
+                if (selectedGroup != null) {
+                    try {
+                        byte[] fileData = java.nio.file.Files.readAllBytes(file.toPath());
+                        msg = chatManager.sendGroupMessage(selectedGroup.getId(), inputField.getText(), file.getName(), fileData, replyingToMessage);
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                        return;
+                    }
+                } else {
+                    msg = chatManager.sendFileMessage(selectedUser, inputField.getText(), file, replyingToMessage);
+                }
                 addMessageBubble(msg, true);
                 inputField.clear();
                 cancelReply();
@@ -399,12 +534,13 @@ public class ChatView {
         java.util.Timer[] typingTimer = new java.util.Timer[1];
 
         inputField.textProperty().addListener((obs, oldText, newText) -> {
-            if (selectedUser == null)
+            String targetId = selectedGroup != null ? selectedGroup.getId() : (selectedUser != null ? selectedUser.getId() : null);
+            if (targetId == null)
                 return;
 
             if (!newText.isEmpty()) {
                 if (!isTypingSent.get()) {
-                    chatManager.sendTypingUpdate(selectedUser.getId(), true);
+                    chatManager.sendTypingUpdate(targetId, true);
                     isTypingSent.set(true);
                 }
 
@@ -415,13 +551,13 @@ public class ChatView {
                 typingTimer[0].schedule(new java.util.TimerTask() {
                     @Override
                     public void run() {
-                        chatManager.sendTypingUpdate(selectedUser.getId(), false);
+                        chatManager.sendTypingUpdate(targetId, false);
                         isTypingSent.set(false);
                     }
                 }, 1500); // Stop typing after 1.5s
             } else {
                 if (isTypingSent.get()) {
-                    chatManager.sendTypingUpdate(selectedUser.getId(), false);
+                    chatManager.sendTypingUpdate(targetId, false);
                     isTypingSent.set(false);
                     if (typingTimer[0] != null)
                         typingTimer[0].cancel();
@@ -437,6 +573,9 @@ public class ChatView {
                 }
                 chatManager.requestCall(selectedUser, com.messenger.common.CallType.AUDIO);
                 addSystemMessage("Initiating audio call to " + selectedUser.getUsername() + "...");
+            } else if (selectedGroup != null) {
+                chatManager.joinGroupCall(selectedGroup.getId());
+                addSystemMessage("Joining group call for " + selectedGroup.getName() + "...");
             }
         });
 
@@ -448,6 +587,9 @@ public class ChatView {
                 }
                 chatManager.requestCall(selectedUser, com.messenger.common.CallType.VIDEO);
                 addSystemMessage("Initiating video call to " + selectedUser.getUsername() + "...");
+            } else if (selectedGroup != null) {
+                chatManager.joinGroupCall(selectedGroup.getId());
+                addSystemMessage("Joining group video call for " + selectedGroup.getName() + "...");
             }
         });
 
@@ -462,22 +604,40 @@ public class ChatView {
         chatManager.setUserListListener(users -> {
             Platform.runLater(() -> {
                 users.removeIf(u -> u.getId().equals(chatManager.getCurrentUser().getId()));
-                usersList.setItems(FXCollections.observableArrayList(users));
+                localContacts.clear();
+                localContacts.addAll(users);
+                updateUnifiedSidebar();
+            });
+        });
+
+        chatManager.setGroupListListener(groups -> {
+            Platform.runLater(() -> {
+                localGroups.clear();
+                localGroups.addAll(groups);
+                updateUnifiedSidebar();
+            });
+        });
+
+        chatManager.setGroupCreatedListener(group -> {
+            Platform.runLater(() -> {
+                if (!localGroups.stream().anyMatch(g -> g.getId().equals(group.getId()))) {
+                    localGroups.add(group);
+                    updateUnifiedSidebar();
+                }
             });
         });
 
         chatManager.setStatusUpdateListener(updatedUser -> {
             Platform.runLater(() -> {
-                // Update in User List
-                java.util.List<User> items = new java.util.ArrayList<>(usersList.getItems());
-                for (User u : items) {
+                // Update in localContacts list
+                for (User u : localContacts) {
                     if (u.getId().equals(updatedUser.getId())) {
                         u.setOnline(updatedUser.isOnline());
                         u.setLastSeen(updatedUser.getLastSeen());
                         break;
                     }
                 }
-                usersList.setItems(FXCollections.observableArrayList(items));
+                updateUnifiedSidebar();
                 usersList.refresh();
 
                 // Update Header if active chat
@@ -493,15 +653,39 @@ public class ChatView {
             });
         });
 
-        chatManager.setTypingListener((senderId, isTyping) -> {
+        chatManager.setTypingListener((senderId, targetId, isTyping) -> {
             Platform.runLater(() -> {
-                if (selectedUser != null && selectedUser.getId().equals(senderId)) {
+                if (selectedGroup != null && selectedGroup.getId().equals(targetId)) {
+                    if (isTyping) {
+                        String typerName = "Someone";
+                        for (User u : selectedGroup.getMembers()) {
+                            if (u.getId().equals(senderId)) {
+                                typerName = u.getUsername();
+                                break;
+                            }
+                        }
+                        contactStatus.setText(typerName + " is typing...");
+                        contactStatus.setTextFill(javafx.scene.paint.Color.web("#00a884"));
+                        showTypingIndicator(true);
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        if (selectedGroup.getMembers() != null) {
+                            for (int i = 0; i < selectedGroup.getMembers().size(); i++) {
+                                sb.append(selectedGroup.getMembers().get(i).getUsername());
+                                if (i < selectedGroup.getMembers().size() - 1) sb.append(", ");
+                            }
+                        }
+                        contactStatus.setText(sb.toString());
+                        contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+                        showTypingIndicator(false);
+                    }
+                } else if (selectedUser != null && selectedUser.getId().equals(senderId)) {
                     if (isTyping) {
                         contactStatus.setText("typing...");
                         contactStatus.setTextFill(javafx.scene.paint.Color.web("#00a884")); // WhatsApp green
                         showTypingIndicator(true);
                     } else {
-                        contactStatus.setText(selectedUser.isOnline() ? "online" : "offline");
+                        contactStatus.setText(selectedUser.isOnline() ? "online" : formatLastSeen(selectedUser.getLastSeen()));
                         contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
                         showTypingIndicator(false);
                     }
@@ -511,9 +695,18 @@ public class ChatView {
 
         chatManager.setMessageListener(msg -> {
             boolean isMe = msg.getSender().getId().equals(chatManager.getCurrentUser().getId());
-            addMessageBubble(msg, isMe);
-            if (!isMe && selectedUser != null && msg.getSender().getId().equals(selectedUser.getId())) {
-                chatManager.sendReadReceipt(selectedUser.getId());
+            boolean isCurrentChat = false;
+            if (selectedUser != null) {
+                isCurrentChat = isMe ? (msg.getReceiver() != null && msg.getReceiver().getId().equals(selectedUser.getId())) : msg.getSender().getId().equals(selectedUser.getId());
+            } else if (selectedGroup != null) {
+                isCurrentChat = msg.getGroupId() != null && msg.getGroupId().equals(selectedGroup.getId());
+            }
+            
+            if (isCurrentChat) {
+                addMessageBubble(msg, isMe);
+                if (!isMe && selectedUser != null) {
+                    chatManager.sendReadReceipt(selectedUser.getId());
+                }
             }
         });
 
@@ -592,6 +785,9 @@ public class ChatView {
                     boolean isMe = m.getSender().getId().equals(chatManager.getCurrentUser().getId());
                     addMessageBubble(m, isMe);
                 }
+                
+                checkAndShowContactBanner();
+
                 if (selectedUser != null) {
                     chatManager.sendReadReceipt(selectedUser.getId());
                 }
@@ -682,6 +878,133 @@ public class ChatView {
                     stopMediaResources();
                 });
             }
+        });
+
+        chatManager.setGroupCallListener(new ChatManager.GroupCallListener() {
+            @Override
+            public void onGroupCallJoinSuccess(String gId, int audioPort, int videoPort, List<User> activeParticipants) {
+                Platform.runLater(() -> {
+                    if (activeCallView != null && activeCallView.getGroupId().equals(gId)) {
+                        activeCallView.updateParticipants(activeParticipants);
+                    } else {
+                        String sIp = "127.0.0.1";
+                        if (chatManager.getNetworkClient() != null) {
+                            sIp = chatManager.getNetworkClient().getServerIp();
+                        }
+                        com.messenger.common.Group group = localGroups.stream()
+                                .filter(g -> g.getId().equals(gId))
+                                .findFirst()
+                                .orElse(new com.messenger.common.Group(gId, "Group Chat", "", "", java.time.LocalDateTime.now()));
+                                
+                        activeCallView = new GroupCallView(gId, group.getName(), chatManager, sIp, audioPort, videoPort, activeParticipants);
+                        activeCallView.setOnClose(() -> {
+                            activeCallView = null;
+                        });
+                        activeCallView.show();
+                    }
+                });
+            }
+
+            @Override
+            public void onGroupCallStateUpdated(String gId, List<User> activeParticipants) {
+                Platform.runLater(() -> {
+                    boolean isCallActive = activeParticipants != null && !activeParticipants.isEmpty();
+
+                    if (isCallActive) {
+                        activeGroupCallMembers.put(gId, activeParticipants);
+                    } else {
+                        activeGroupCallMembers.remove(gId);
+                    }
+                    
+                    if (activeCallView != null && activeCallView.getGroupId().equals(gId)) {
+                        activeCallView.updateParticipants(activeParticipants);
+                    }
+                    
+                    updateHeaderBarForGroup(gId, activeParticipants);
+                });
+            }
+
+            @Override
+            public void onGroupCallStarted(String gId) {
+                Platform.runLater(() -> {
+                    com.messenger.common.Group group = localGroups.stream()
+                            .filter(g -> g.getId().equals(gId))
+                            .findFirst()
+                            .orElse(null);
+                    String gName = group != null ? group.getName() : "Group Chat";
+                    showGroupCallNotification(gName, gId);
+                });
+            }
+        });
+    }
+
+    private void updateHeaderBarForGroup(String gId, List<User> activeParticipants) {
+        Platform.runLater(() -> {
+            if (selectedGroup != null && selectedGroup.getId().equals(gId)) {
+                if (activeParticipants.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    if (selectedGroup.getMembers() != null) {
+                        for (int i = 0; i < selectedGroup.getMembers().size(); i++) {
+                            sb.append(selectedGroup.getMembers().get(i).getUsername());
+                            if (i < selectedGroup.getMembers().size() - 1) sb.append(", ");
+                        }
+                    }
+                    contactStatus.setText(sb.toString());
+                    contactStatus.setTextFill(javafx.scene.paint.Color.web("#8696a0"));
+
+                    audioCallBtn.setVisible(true);
+                    audioCallBtn.setManaged(true);
+                    videoCallBtn.setVisible(true);
+                    videoCallBtn.setManaged(true);
+                    joinCallBtn.setVisible(false);
+                    joinCallBtn.setManaged(false);
+                } else {
+                    StringBuilder sb = new StringBuilder("🟢 Active Call (");
+                    for (int i = 0; i < activeParticipants.size(); i++) {
+                        sb.append(activeParticipants.get(i).getUsername());
+                        if (i < activeParticipants.size() - 1) sb.append(", ");
+                    }
+                    sb.append(")");
+                    contactStatus.setText(sb.toString());
+                    contactStatus.setTextFill(javafx.scene.paint.Color.web("#25D366"));
+
+                    audioCallBtn.setVisible(false);
+                    audioCallBtn.setManaged(false);
+                    videoCallBtn.setVisible(false);
+                    videoCallBtn.setManaged(false);
+                    joinCallBtn.setVisible(true);
+                    joinCallBtn.setManaged(true);
+                }
+            }
+        });
+    }
+
+    private void showGroupCallNotification(String groupName, String groupId) {
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle("Group Call Started");
+            alert.setHeaderText("Active Group Call");
+            alert.setContentText("A call has started in group '" + groupName + "'. Do you want to join?");
+            
+            ButtonType joinButtonType = new ButtonType("Join Now");
+            ButtonType dismissButtonType = new ButtonType("Dismiss", ButtonBar.ButtonData.CANCEL_CLOSE);
+            alert.getButtonTypes().setAll(joinButtonType, dismissButtonType);
+            
+            alert.showAndWait().ifPresent(response -> {
+                if (response == joinButtonType) {
+                    for (Object item : usersList.getItems()) {
+                        if (item instanceof com.messenger.common.Group) {
+                            com.messenger.common.Group g = (com.messenger.common.Group) item;
+                            if (g.getId().equals(groupId)) {
+                                usersList.getSelectionModel().select(g);
+                                chatManager.joinGroupCall(groupId);
+                                addSystemMessage("Joining group call for " + g.getName() + "...");
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
         });
     }
 
@@ -1043,6 +1366,14 @@ public class ChatView {
 
             VBox mainContent = new VBox(5);
 
+            if (msg.getGroupId() != null && !isMe) {
+                Label senderNameLbl = new Label(msg.getSender() != null ? msg.getSender().getUsername() : "Group Member");
+                int hash = (msg.getSender() != null ? msg.getSender().getUsername() : "Group Member").hashCode();
+                int hue = Math.abs(hash % 360);
+                senderNameLbl.setStyle("-fx-text-fill: hsb(" + hue + ", 75%, 85%); -fx-font-weight: bold; -fx-font-size: 13;");
+                mainContent.getChildren().add(senderNameLbl);
+            }
+
             if (msg.getLinkTitle() != null) {
                 VBox linkCard = new VBox(5);
                 linkCard.setStyle("-fx-background-color: rgba(0,0,0,0.2); -fx-background-radius: 5; -fx-padding: 8;");
@@ -1389,5 +1720,171 @@ public class ChatView {
         HBox layout = new HBox(card, closeBtn);
         HBox.setHgrow(card, Priority.ALWAYS);
         linkPreviewArea.getChildren().add(layout);
+    }
+
+    private void updateUnifiedSidebar() {
+        Platform.runLater(() -> {
+            java.util.List<Object> combined = new java.util.ArrayList<>();
+            combined.addAll(localGroups);
+            combined.addAll(localContacts);
+            usersList.setItems(FXCollections.observableArrayList(combined));
+        });
+    }
+
+    private void openNewGroupModal() {
+        javafx.stage.Stage modal = new javafx.stage.Stage();
+        modal.initOwner(view.getScene().getWindow());
+        modal.initModality(javafx.stage.Modality.APPLICATION_MODAL);
+        modal.setTitle("Create New Group");
+
+        VBox layout = new VBox(15);
+        layout.setPadding(new javafx.geometry.Insets(20));
+        layout.setStyle("-fx-background-color: #111b21;");
+
+        Label title = new Label("Create Group");
+        title.setStyle("-fx-text-fill: #00a884; -fx-font-size: 18; -fx-font-weight: bold;");
+
+        TextField nameField = new TextField();
+        nameField.setPromptText("Group Name");
+        nameField.setStyle("-fx-background-color: #2a3942; -fx-text-fill: white; -fx-prompt-text-fill: #8696a0; -fx-background-radius: 8; -fx-padding: 8;");
+
+        TextField descField = new TextField();
+        descField.setPromptText("Description (Optional)");
+        descField.setStyle("-fx-background-color: #2a3942; -fx-text-fill: white; -fx-prompt-text-fill: #8696a0; -fx-background-radius: 8; -fx-padding: 8;");
+
+        Label membersLabel = new Label("Select Members:");
+        membersLabel.setStyle("-fx-text-fill: #e9edef; -fx-font-size: 14; -fx-font-weight: bold;");
+
+        ListView<javafx.scene.layout.BorderPane> contactsSelectionList = new ListView<>();
+        contactsSelectionList.setStyle("-fx-background-color: #111b21; -fx-control-inner-background: #111b21;");
+        contactsSelectionList.setPrefHeight(200);
+
+        java.util.List<javafx.scene.control.CheckBox> checkBoxes = new java.util.ArrayList<>();
+        for (User user : localContacts) {
+            javafx.scene.layout.BorderPane cell = new javafx.scene.layout.BorderPane();
+            Label name = new Label(user.getUsername() + " (" + user.getPhoneNumber() + ")");
+            name.setStyle("-fx-text-fill: #e9edef;");
+            
+            javafx.scene.control.CheckBox cb = new javafx.scene.control.CheckBox();
+            cb.setUserData(user.getId());
+            cb.setStyle("-fx-accent: #00a884;");
+            checkBoxes.add(cb);
+            
+            cell.setLeft(name);
+            cell.setRight(cb);
+            contactsSelectionList.getItems().add(cell);
+        }
+
+        Button createBtn = new Button("CREATE GROUP");
+        createBtn.setStyle("-fx-background-color: #00a884; -fx-text-fill: #111b21; -fx-font-weight: bold; -fx-font-size: 14; -fx-background-radius: 8; -fx-padding: 10 20 10 20; -fx-cursor: hand;");
+        createBtn.setMaxWidth(Double.MAX_VALUE);
+        createBtn.setOnAction(ev -> {
+            String name = nameField.getText().trim();
+            String desc = descField.getText().trim();
+            if (name.isEmpty()) {
+                return;
+            }
+
+            java.util.List<String> selectedIds = new java.util.ArrayList<>();
+            for (javafx.scene.control.CheckBox cb : checkBoxes) {
+                if (cb.isSelected()) {
+                    selectedIds.add((String) cb.getUserData());
+                }
+            }
+
+            chatManager.createGroup(name, desc, selectedIds);
+            modal.close();
+        });
+
+        layout.getChildren().addAll(title, nameField, descField, membersLabel, contactsSelectionList, createBtn);
+        modal.setScene(new javafx.scene.Scene(layout, 350, 480));
+        modal.showAndWait();
+    }
+
+    private void checkAndShowContactBanner() {
+        if (selectedUser != null) {
+            boolean isKnown = false;
+            for (User u : localContacts) {
+                if (u.getId().equals(selectedUser.getId()) && "ACCEPTED".equals(u.getRelationshipStatus())) {
+                    isKnown = true;
+                    break;
+                }
+            }
+            if (!isKnown) {
+                VBox banner = new VBox(10);
+                banner.setId("contact_banner");
+                banner.setStyle("-fx-background-color: #202c33; -fx-padding: 15; -fx-background-radius: 8;");
+                banner.setAlignment(javafx.geometry.Pos.CENTER);
+                
+                Label warning = new Label("The sender is not in your contacts list.");
+                warning.setTextFill(javafx.scene.paint.Color.web("#e9edef"));
+                warning.setFont(javafx.scene.text.Font.font("System", 14));
+                
+                HBox buttons = new HBox(20);
+                buttons.setAlignment(javafx.geometry.Pos.CENTER);
+                
+                Button blockBtn = new Button("Block");
+                blockBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #f15c6d; -fx-border-color: #f15c6d; -fx-border-radius: 4; -fx-padding: 5 15; -fx-cursor: hand;");
+                
+                Button acceptBtn = new Button("Accept / Add to Contacts");
+                acceptBtn.setStyle("-fx-background-color: #00a884; -fx-text-fill: #111b21; -fx-font-weight: bold; -fx-background-radius: 4; -fx-padding: 5 15; -fx-cursor: hand;");
+                
+                blockBtn.setOnAction(e -> {
+                    chatManager.blockUser(selectedUser.getId());
+                    chatArea.getChildren().remove(banner);
+                });
+                
+                acceptBtn.setOnAction(e -> {
+                    chatManager.acceptUser(selectedUser.getId());
+                    chatArea.getChildren().remove(banner);
+                });
+                
+                buttons.getChildren().addAll(blockBtn, acceptBtn);
+                banner.getChildren().addAll(warning, buttons);
+                
+                chatArea.getChildren().add(banner);
+            }
+        }
+    }
+    private javafx.scene.layout.StackPane createAvatarWithSilhouette(double radius) {
+        javafx.scene.layout.StackPane stack = new javafx.scene.layout.StackPane();
+        javafx.scene.shape.Circle background = new javafx.scene.shape.Circle(radius, javafx.scene.paint.Color.web("#dfe5e7"));
+        
+        javafx.scene.shape.SVGPath silhouette = new javafx.scene.shape.SVGPath();
+        silhouette.setContent("M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12,5c1.66,0,3,1.34,3,3s-1.34,3-3,3s-3-1.34-3-3S10.34,5,12,5z M12,19.2c-2.5,0-4.71-1.28-6-3.22c0.03-1.99,4-3.08,6-3.08c1.99,0,5.97,1.09,6,3.08C16.71,17.92,14.5,19.2,12,19.2z");
+        silhouette.setFill(javafx.scene.paint.Color.web("#ffffff"));
+        double scale = radius / 12.0; 
+        silhouette.setScaleX(scale);
+        silhouette.setScaleY(scale);
+        
+        stack.getChildren().addAll(background, silhouette);
+        stack.getProperties().put("background", background);
+        stack.getProperties().put("silhouette", silhouette);
+        return stack;
+    }
+
+    private void applyAvatarImage(javafx.scene.layout.StackPane avatarStack, byte[] imageData) {
+        javafx.scene.shape.Circle background = (javafx.scene.shape.Circle) avatarStack.getProperties().get("background");
+        javafx.scene.shape.SVGPath silhouette = (javafx.scene.shape.SVGPath) avatarStack.getProperties().get("silhouette");
+        
+        if (imageData != null && imageData.length > 0) {
+            try {
+                java.io.ByteArrayInputStream bis = new java.io.ByteArrayInputStream(imageData);
+                javafx.scene.image.Image img = new javafx.scene.image.Image(bis);
+                if (!img.isError()) {
+                    background.setFill(new javafx.scene.paint.ImagePattern(img));
+                    silhouette.setVisible(false);
+                } else {
+                    background.setFill(javafx.scene.paint.Color.web("#dfe5e7"));
+                    silhouette.setVisible(true);
+                }
+            } catch (Exception e) {
+                background.setFill(javafx.scene.paint.Color.web("#dfe5e7"));
+                silhouette.setVisible(true);
+            }
+        } else {
+            background.setFill(javafx.scene.paint.Color.web("#dfe5e7"));
+            silhouette.setVisible(true);
+        }
     }
 }

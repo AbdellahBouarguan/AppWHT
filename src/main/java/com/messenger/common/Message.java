@@ -18,6 +18,7 @@ public class Message implements Serializable {
     private String content;
     private User sender;
     private User receiver;
+    private String groupId;
     private LocalDateTime timestamp;
     private MessageStatus status;
     private byte[] fileData;
@@ -33,6 +34,15 @@ public class Message implements Serializable {
         this.id = UUID.randomUUID().toString();
         this.sender = sender;
         this.receiver = receiver;
+        this.content = content;
+        this.timestamp = LocalDateTime.now();
+        this.status = MessageStatus.SENDING;
+    }
+
+    public Message(User sender, String groupId, String content) {
+        this.id = UUID.randomUUID().toString();
+        this.sender = sender;
+        this.groupId = groupId;
         this.content = content;
         this.timestamp = LocalDateTime.now();
         this.status = MessageStatus.SENDING;
@@ -68,6 +78,14 @@ public class Message implements Serializable {
 
     public void setReceiver(User receiver) {
         this.receiver = receiver;
+    }
+
+    public String getGroupId() {
+        return groupId;
+    }
+
+    public void setGroupId(String groupId) {
+        this.groupId = groupId;
     }
 
     public LocalDateTime getTimestamp() {

@@ -11,6 +11,7 @@ public class User implements Serializable {
     private boolean isOnline;
     private byte[] avatarData;
     private java.time.LocalDateTime lastSeen;
+    private String relationshipStatus; // "PENDING", "ACCEPTED", "BLOCKED"
 
     public User(String id, String username) {
         this.id = id;
@@ -78,5 +79,13 @@ public class User implements Serializable {
     public String toString() {
         return username + (phoneNumber != null && !phoneNumber.isEmpty() ? " (" + phoneNumber + ")" : "")
                 + (isOnline ? " (Online)" : " (Offline)");
+    }
+
+    public String getRelationshipStatus() {
+        return relationshipStatus;
+    }
+
+    public void setRelationshipStatus(String relationshipStatus) {
+        this.relationshipStatus = relationshipStatus;
     }
 }

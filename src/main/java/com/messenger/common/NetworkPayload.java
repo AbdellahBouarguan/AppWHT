@@ -31,7 +31,21 @@ public class NetworkPayload implements Serializable {
         UPDATE_PROFILE,
         MESSAGE_READ,
         DELETE_MESSAGE,
-        MESSAGE_REACTION
+        MESSAGE_REACTION,
+        CREATE_GROUP_REQUEST,
+        CREATE_GROUP_SUCCESS,
+        FETCH_GROUPS_REQUEST,
+        FETCH_GROUPS_RESPONSE,
+        GROUP_MESSAGE_RECEIVE,
+        ADD_GROUP_MEMBER,
+        GROUP_CALL_JOIN_REQUEST,
+        GROUP_CALL_JOIN_SUCCESS,
+        GROUP_CALL_LEAVE_REQUEST,
+        GROUP_CALL_STATE_UPDATE,
+        GROUP_CALL_STARTED,
+        BLOCK_CONTACT_REQUEST,
+        ACCEPT_CONTACT_REQUEST,
+        CONTACT_STATUS_UPDATE
     }
 
     private PayloadType type;

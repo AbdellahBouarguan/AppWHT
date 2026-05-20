@@ -2,19 +2,19 @@ package com.messenger.client.ui;
 
 import com.messenger.client.ChatManager;
 import com.messenger.client.ClientMain;
-import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.effect.DropShadow;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.scene.effect.DropShadow;
 
 public class LoginView {
+
     private ClientMain mainApp;
     private ChatManager chatManager;
     private StackPane root;
@@ -27,6 +27,7 @@ public class LoginView {
     private TextField regUsernameField;
     private TextField regPhoneField;
     private PasswordField regPasswordField;
+    private PasswordField regPasswordConfirmField;
     private Label regErrorLabel;
     private TextField regServerIpField;
 
@@ -43,153 +44,202 @@ public class LoginView {
 
     private void switchToLogin() {
         root.getChildren().clear();
-        root.getChildren().add(buildLayout(buildLoginForm(), "To use Messenger on your computer:"));
+        root.getChildren().add(buildLayout(buildLoginForm(), "WhatsApp"));
     }
 
     private void switchToRegister() {
         root.getChildren().clear();
-        root.getChildren().add(buildLayout(buildRegisterForm(), "Create a new Messenger account:"));
+        root.getChildren().add(buildLayout(buildRegisterForm(), "WhatsApp"));
     }
 
-    private StackPane buildLayout(VBox form, String leftTitle) {
-        // WhatsApp Web Background
+    // ===================== LAYOUT CENTRÉ =====================
+    private StackPane buildLayout(VBox form, String titleText) {
+
         VBox background = new VBox();
+
         Region topHeader = new Region();
-        topHeader.setPrefHeight(222);
+        topHeader.setPrefHeight(220);
         topHeader.setStyle("-fx-background-color: #00a884;");
-        
+
         Region bottomBg = new Region();
         VBox.setVgrow(bottomBg, Priority.ALWAYS);
         bottomBg.setStyle("-fx-background-color: #111b21;");
-        
+
         background.getChildren().addAll(topHeader, bottomBg);
 
-        // Center Card
-        HBox cardContent = new HBox(50);
-        cardContent.setPadding(new Insets(60, 60, 60, 60));
+        VBox content = new VBox(15);
+        content.setAlignment(Pos.CENTER);
+        content.setPadding(new Insets(40));
 
-        // Left Side: Instructions
-        VBox leftSide = new VBox(20);
-        Label title = new Label(leftTitle);
-        title.setFont(Font.font("System", FontWeight.NORMAL, 28));
-        title.setTextFill(Color.web("#e9edef"));
-        
-        VBox instructionsList = new VBox(15);
-        instructionsList.getChildren().addAll(
-            instructionItem("1.", "Open Messenger on your device"),
-            instructionItem("2.", "Tap Menu on Android, or Settings on iPhone"),
-            instructionItem("3.", "Tap Linked Devices and point your phone to this screen")
-        );
-        Label smallDisclaimer = new Label("(For now, please use the login form on the right)");
-        smallDisclaimer.setTextFill(Color.web("#8696a0"));
-        smallDisclaimer.setFont(Font.font("System", 12));
+        content.getChildren().addAll(
+                createWhatsappLogo(),
 
-        leftSide.getChildren().addAll(title, instructionsList, new Region(), smallDisclaimer);
-        VBox.setVgrow(leftSide, Priority.ALWAYS);
+                new Label("WhatsApp") {
+                    {
+                        setFont(Font.font("Segoe UI", FontWeight.BOLD, 34));
+                        setTextFill(Color.web("#e9edef"));
+                    }
+                },
 
-        // Right Side: Form (Mimicking the QR Code Area)
-        VBox rightSide = new VBox();
-        rightSide.setAlignment(Pos.CENTER);
-        rightSide.setPrefWidth(300);
-        rightSide.getChildren().add(form);
+                new Label("Connectez-vous pour accéder à vos messages") {
+                    {
+                        setFont(Font.font("Segoe UI", 16));
+                        setTextFill(Color.web("#8696a0"));
+                    }
+                },
 
-        cardContent.getChildren().addAll(leftSide, rightSide);
+                form);
 
-        StackPane card = new StackPane(cardContent);
-        card.setMaxSize(1000, 600);
-        card.setStyle("-fx-background-color: #202c33; -fx-background-radius: 3;");
+        StackPane card = new StackPane(content);
+
+        card.setMaxWidth(420);
+        card.setStyle(
+                "-fx-background-color: #202c33;" +
+                        "-fx-background-radius: 12;");
+
         DropShadow shadow = new DropShadow();
-        shadow.setColor(Color.rgb(0, 0, 0, 0.2));
-        shadow.setRadius(15);
+        shadow.setRadius(18);
         shadow.setOffsetY(5);
+        shadow.setColor(Color.rgb(0, 0, 0, 0.35));
         card.setEffect(shadow);
 
         StackPane mainLayout = new StackPane(background, card);
         StackPane.setAlignment(card, Pos.CENTER);
+
         return mainLayout;
     }
 
-    private HBox instructionItem(String num, String text) {
-        Label n = new Label(num);
-        n.setTextFill(Color.web("#e9edef"));
-        n.setFont(Font.font("System", FontWeight.BOLD, 18));
-        Label t = new Label(text);
-        t.setTextFill(Color.web("#e9edef"));
-        t.setFont(Font.font("System", 18));
-        t.setWrapText(true);
-        HBox box = new HBox(15, n, t);
-        return box;
-    }
-
+    // ===================== LOGIN =====================
     private VBox buildLoginForm() {
-        VBox form = new VBox(15);
+
+        VBox form = new VBox(10);
         form.setAlignment(Pos.CENTER);
-        
+
+        Label userLabel = label("Nom utilisateur");
         usernameField = createStyledTextField("Username");
+
+        Label passLabel = label("Mot de passe");
         passwordField = createStyledPasswordField("Password");
-        serverIpField = createStyledTextField("Server IP (127.0.0.1)");
+
+        Label ipLabel = label("Adresse IP du serveur");
+        serverIpField = createStyledTextField("127.0.0.1");
         serverIpField.setText("127.0.0.1");
 
         errorLabel = new Label("");
         errorLabel.setTextFill(Color.web("#f15c6d"));
-        errorLabel.setFont(Font.font("System", 13));
-        errorLabel.setWrapText(true);
 
-        Button loginBtn = createPrimaryButton("Log In");
+        Button loginBtn = createPrimaryButton("Se connecter");
+
         loginBtn.setOnAction(e -> {
-            errorLabel.setText("Connecting...");
+
+            errorLabel.setText("Connexion...");
+
             chatManager.setOnLoginSuccess(() -> mainApp.navigateToChat());
-            chatManager.setOnLoginFailed(() -> errorLabel.setText("Login failed!"));
+
+            chatManager.setOnLoginFailed(() -> errorLabel.setText("Echec connexion"));
+
             String ip = serverIpField.getText().trim();
-            if (ip.isEmpty()) ip = "127.0.0.1";
-            chatManager.connectAndAuth(ip, 1234, usernameField.getText(), passwordField.getText(), "", false);
+            if (ip.isEmpty())
+                ip = "127.0.0.1";
+
+            chatManager.connectAndAuth(
+                    ip,
+                    1234,
+                    usernameField.getText(),
+                    passwordField.getText(),
+                    "",
+                    false);
         });
 
-        Label link = createLinkText("Need an account? Register");
+        Label link = createLinkText(" pas encore de compte? S'inscrire");
         link.setOnMouseClicked(e -> switchToRegister());
 
-        form.getChildren().addAll(usernameField, passwordField, serverIpField, errorLabel, loginBtn, link);
+        form.getChildren().addAll(
+                userLabel, usernameField,
+                passLabel, passwordField,
+                ipLabel, serverIpField,
+                errorLabel,
+                loginBtn,
+                link);
+
         return form;
     }
 
+    // ===================== REGISTER =====================
     private VBox buildRegisterForm() {
-        VBox form = new VBox(15);
+
+        VBox form = new VBox(10);
         form.setAlignment(Pos.CENTER);
 
+        Label userLabel = label("Nom utilisateur");
         regUsernameField = createStyledTextField("Username");
+
+        Label phoneLabel = label("Numéro téléphone");
         regPhoneField = createStyledTextField("Phone Number");
+
+        Label passLabel = label("Mot de passe");
         regPasswordField = createStyledPasswordField("Password");
-        regServerIpField = createStyledTextField("Server IP (127.0.0.1)");
+
+        Label pass2Label = label("Confirmer mot de passe");
+        regPasswordConfirmField = createStyledPasswordField("Repeat Password");
+
+        Label ipLabel = label("Adresse IP du serveur");
+        regServerIpField = createStyledTextField("127.0.0.1");
         regServerIpField.setText("127.0.0.1");
 
         regErrorLabel = new Label("");
         regErrorLabel.setTextFill(Color.web("#f15c6d"));
-        regErrorLabel.setFont(Font.font("System", 13));
-        regErrorLabel.setWrapText(true);
 
         Button regBtn = createPrimaryButton("Register");
+
         regBtn.setOnAction(e -> {
-            regErrorLabel.setText("Connecting...");
+            // verification mot de pass
+            if (!regPasswordField.getText().equals(regPasswordConfirmField.getText())) {
+                regErrorLabel.setText("Les mots de passe ne correspondent pas !");
+                return;
+            }
+
+            regErrorLabel.setText("Connexion...");
+
             chatManager.setOnLoginSuccess(() -> mainApp.navigateToChat());
-            chatManager.setOnLoginFailed(() -> regErrorLabel.setText("Registration failed!"));
+
+            chatManager.setOnLoginFailed(() -> regErrorLabel.setText("Echec inscription"));
+
             String ip = regServerIpField.getText().trim();
-            if (ip.isEmpty()) ip = "127.0.0.1";
-            chatManager.connectAndAuth(ip, 1234, regUsernameField.getText(), regPasswordField.getText(),
-                    regPhoneField.getText(), true);
+            if (ip.isEmpty())
+                ip = "127.0.0.1";
+
+            chatManager.connectAndAuth(
+                    ip,
+                    1234,
+                    regUsernameField.getText(),
+                    regPasswordField.getText(),
+                    regPhoneField.getText(),
+                    true);
         });
 
-        Label link = createLinkText("Have an account? Log In");
+        Label link = createLinkText("Déjà un compte ?");
         link.setOnMouseClicked(e -> switchToLogin());
 
-        form.getChildren().addAll(regUsernameField, regPhoneField, regPasswordField, regServerIpField, regErrorLabel, regBtn, link);
+        form.getChildren().addAll(
+                userLabel, regUsernameField,
+                phoneLabel, regPhoneField,
+                passLabel, regPasswordField,
+                pass2Label, regPasswordConfirmField,
+                ipLabel, regServerIpField,
+                regErrorLabel,
+                regBtn,
+                link);
+
         return form;
     }
 
+    // ===================== STYLE =====================
     private TextField createStyledTextField(String prompt) {
         TextField tf = new TextField();
         tf.setPromptText(prompt);
         tf.setPrefHeight(40);
-        tf.setStyle("-fx-background-color: #2a3942; -fx-text-fill: #e9edef; -fx-prompt-text-fill: #8696a0; -fx-background-radius: 6; -fx-padding: 10; -fx-font-size: 14;");
+        tf.setStyle("-fx-background-color: #2a3942; -fx-text-fill: #e9edef; -fx-prompt-text-fill: #8696a0;");
         return tf;
     }
 
@@ -197,27 +247,46 @@ public class LoginView {
         PasswordField pf = new PasswordField();
         pf.setPromptText(prompt);
         pf.setPrefHeight(40);
-        pf.setStyle("-fx-background-color: #2a3942; -fx-text-fill: #e9edef; -fx-prompt-text-fill: #8696a0; -fx-background-radius: 6; -fx-padding: 10; -fx-font-size: 14;");
+        pf.setStyle("-fx-background-color: #2a3942; -fx-text-fill: #e9edef; -fx-prompt-text-fill: #8696a0;");
         return pf;
     }
 
     private Button createPrimaryButton(String text) {
         Button btn = new Button(text);
-        btn.setMaxWidth(Double.MAX_VALUE);
         btn.setPrefHeight(40);
-        btn.setStyle("-fx-background-color: #00a884; -fx-text-fill: #111b21; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand; -fx-font-size: 14;");
-        btn.setOnMouseEntered(e -> btn.setStyle("-fx-background-color: #00bfa5; -fx-text-fill: #111b21; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand; -fx-font-size: 14;"));
-        btn.setOnMouseExited(e -> btn.setStyle("-fx-background-color: #00a884; -fx-text-fill: #111b21; -fx-font-weight: bold; -fx-background-radius: 6; -fx-cursor: hand; -fx-font-size: 14;"));
+        btn.setMaxWidth(Double.MAX_VALUE);
+        btn.setStyle("-fx-background-color: #00a884; -fx-text-fill: #111b21; -fx-font-weight: bold;");
         return btn;
     }
 
     private Label createLinkText(String text) {
-        Label label = new Label(text);
-        label.setTextFill(Color.web("#53bdeb"));
-        label.setFont(Font.font("System", 13));
-        label.setStyle("-fx-cursor: hand;");
-        label.setOnMouseEntered(e -> label.setStyle("-fx-cursor: hand; -fx-underline: true;"));
-        label.setOnMouseExited(e -> label.setStyle("-fx-cursor: hand; -fx-underline: false;"));
-        return label;
+        Label l = new Label(text);
+        l.setTextFill(Color.web("#53bdeb"));
+        return l;
+    }
+
+    private Label label(String text) {
+        Label l = new Label(text);
+        l.setTextFill(Color.web("#e9edef"));
+        l.setFont(Font.font("Segoe UI", 13));
+        l.setMaxWidth(Double.MAX_VALUE);
+        l.setAlignment(Pos.CENTER_LEFT);
+        return l;
+    }
+
+    // ===================== LOGO =====================
+    private StackPane createWhatsappLogo() {
+
+        Circle circle = new Circle(30);
+        circle.setFill(Color.web("#00a884"));
+
+        SVGPath icon = new SVGPath();
+        icon.setContent(
+                "M37.7 31.2c-.6-.4-3.8-2-4.4-2.1-.6-.2-1-.4-1.4.3l-2 2.5c-.4.4-.8.5-1.5.2-.6-.3-2.7-1-5.1-3.2-2-1.7-3.2-3.8-3.6-4.5-.4-.6 0-1 .3-1.3l1-1.1.6-1.1c.2-.4 0-.8 0-1.1l-2-4.8c-.6-1.3-1.1-1-1.5-1.1h-1.2c-.5 0-1.2.1-1.8.8-.5.6-2.2 2.2-2.2 5.3 0 3.2 2.3 6.3 2.6 6.7.3.4 4.6 7 11 9.7l3.7 1.4c1.5.5 3 .4 4 .2 1.3-.1 3.9-1.5 4.4-3 .5-1.5.5-2.8.4-3-.2-.4-.6-.5-1.3-.8M26 47.2c-3.9 0-7.6-1-11-3l-.7-.4-8.1 2L8.4 38l-.6-.8A21.4 21.4 0 0126 4.4a21.3 21.3 0 0121.4 21.4c0 11.8-9.6 21.4-21.4 21.4M44.2 7.6a25.8 25.8 0 00-40.6 31L0 52l13.7-3.6A25.8 25.8 0 0044.3 7.5");
+        icon.setFill(Color.WHITE);
+        icon.setScaleX(0.8);
+        icon.setScaleY(0.8);
+
+        return new StackPane(circle, icon);
     }
 }
